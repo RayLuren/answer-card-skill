@@ -1,6 +1,54 @@
+import json
+from pathlib import Path
+
 import pytest
 
-from answercard.frame_alignment import FrameMeasurement, alignment_corrections, alignment_spreads
+from answercard.frame_alignment import (
+    FrameMeasurement,
+    alignment_corrections,
+    alignment_spreads,
+    load_alignment_pass_summaries,
+)
+
+
+def test_load_alignment_pass_summaries_records_standard_and_result(tmp_path: Path) -> None:
+    report = tmp_path / "frame_alignment.json"
+    report.write_text(
+        json.dumps(
+            {
+                "passes": [
+                    {"pass": 0, "top_spread_mm": 4.2, "bottom_spread_mm": 48.0},
+                    {"pass": 1, "top_spread_mm": 0.4, "bottom_spread_mm": 1.2},
+                    {"pass": 2, "top_spread_mm": 0.3, "bottom_spread_mm": 1.0},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert load_alignment_pass_summaries(report, tolerance_mm=1.1) == [
+        {
+            "pass": 0,
+            "top_spread_mm": 4.2,
+            "bottom_spread_mm": 48.0,
+            "tolerance_mm": 1.1,
+            "passed": False,
+        },
+        {
+            "pass": 1,
+            "top_spread_mm": 0.4,
+            "bottom_spread_mm": 1.2,
+            "tolerance_mm": 1.1,
+            "passed": False,
+        },
+        {
+            "pass": 2,
+            "top_spread_mm": 0.3,
+            "bottom_spread_mm": 1.0,
+            "tolerance_mm": 1.1,
+            "passed": True,
+        },
+    ]
 
 
 def test_alignment_corrections_use_a_fixed_target_and_allow_reverse_adjustment() -> None:

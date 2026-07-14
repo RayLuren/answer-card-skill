@@ -20,6 +20,7 @@ from answercard.ai_layout_to_qspec import ai_layout_to_qspec
 from answercard.frame_alignment import (
     DEFAULT_ALIGNMENT_TOLERANCE_MM,
     DEFAULT_MAX_ALIGNMENT_PASSES,
+    load_alignment_pass_summaries,
 )
 from answercard.pipeline_timing import PipelineTimer
 from answercard.schema import load_spec
@@ -161,15 +162,28 @@ def run_full_pipeline(
         omit_front_page=omit_front_page,
         timer=timer,
     )
-    pdf_output = _run_stage(
-        "build_answer_card",
-        build_answer_card,
-        written_qspec,
-        build_dir=resolved_build_dir,
-        align_pages=True,
-        alignment_tolerance_mm=alignment_tolerance_mm,
-        max_alignment_passes=max_alignment_passes,
-        timer=timer,
+    try:
+        pdf_output = _run_stage(
+            "build_answer_card",
+            build_answer_card,
+            written_qspec,
+            build_dir=resolved_build_dir,
+            align_pages=True,
+            alignment_tolerance_mm=alignment_tolerance_mm,
+            max_alignment_passes=max_alignment_passes,
+            timer=timer,
+        )
+    except PipelineError:
+        _record_alignment_history(
+            timer,
+            resolved_build_dir / "frame_alignment.json",
+            alignment_tolerance_mm,
+        )
+        raise
+    _record_alignment_history(
+        timer,
+        resolved_build_dir / "frame_alignment.json",
+        alignment_tolerance_mm,
     )
     preview_outputs = _run_stage(
         "render_pdf_pages",
@@ -216,6 +230,23 @@ def _run_stage(
         return func(*args, **kwargs)
     except (OSError, RuntimeError, ValueError) as exc:
         raise PipelineError(f"{stage} failed: {exc}") from exc
+
+
+def _record_alignment_history(
+    timer: PipelineTimer,
+    report_path: Path,
+    tolerance_mm: float,
+) -> None:
+    if not report_path.is_file():
+        return
+    try:
+        history = load_alignment_pass_summaries(
+            report_path,
+            tolerance_mm=tolerance_mm,
+        )
+    except (OSError, ValueError, json.JSONDecodeError):
+        return
+    timer.update_result({"alignment_history": history})
 
 
 def _read_outline_counts(outline_path: str | Path) -> tuple[int, int]:

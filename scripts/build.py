@@ -79,6 +79,7 @@ def _align_compiled_pages(
     page_top_spacers = [0.0] * expected_body_page_count
     report: list[dict[str, object]] = []
     alignment_target_mm: float | None = None
+    _write_alignment_report(build_dir, report)
 
     for pass_number in range(max_passes + 1):
         measurements = measure_pdf_frames(pdf_path, skip_pages=front_page_count)

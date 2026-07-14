@@ -3,6 +3,8 @@ import importlib.util
 import json
 import sys
 
+from answercard.pipeline_timing import PipelineTimer
+
 
 FULL_PIPELINE_SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "full_pipeline.py"
 FULL_PIPELINE_SPEC = importlib.util.spec_from_file_location(
@@ -16,6 +18,54 @@ FULL_PIPELINE_SPEC.loader.exec_module(full_pipeline_script)
 
 PipelineError = full_pipeline_script.PipelineError
 run_full_pipeline = full_pipeline_script.run_full_pipeline
+
+
+def test_record_alignment_history_persists_answer_free_pass_summaries(tmp_path: Path) -> None:
+    pipeline_report = tmp_path / "pipeline_report.json"
+    timer = PipelineTimer(pipeline_report)
+    timer.begin(label="测试答题卡")
+    alignment_report = tmp_path / "frame_alignment.json"
+    alignment_report.write_text(
+        json.dumps(
+            {
+                "passes": [
+                    {
+                        "pass": 0,
+                        "top_spread_mm": 4.698,
+                        "bottom_spread_mm": 59.044,
+                        "pages": [{"page": 2}],
+                    },
+                    {
+                        "pass": 1,
+                        "top_spread_mm": 0.0,
+                        "bottom_spread_mm": 1.143,
+                        "pages": [{"page": 2}],
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    full_pipeline_script._record_alignment_history(timer, alignment_report, 1.1)
+
+    stored = json.loads(pipeline_report.read_text(encoding="utf-8"))
+    assert stored["result"]["alignment_history"] == [
+        {
+            "pass": 0,
+            "top_spread_mm": 4.698,
+            "bottom_spread_mm": 59.044,
+            "tolerance_mm": 1.1,
+            "passed": False,
+        },
+        {
+            "pass": 1,
+            "top_spread_mm": 0.0,
+            "bottom_spread_mm": 1.143,
+            "tolerance_mm": 1.1,
+            "passed": False,
+        },
+    ]
 
 
 def _valid_qspec_yaml(*, blocks: str | None = None) -> str:
@@ -263,7 +313,7 @@ def test_full_pipeline_uses_default_paths_and_prints_summary(
 
     report = json.loads((build_dir / "pipeline_report.json").read_text(encoding="utf-8"))
     assert report["label"] == "Chemistry Answer Card"
-    assert report["configuration"]["alignment_tolerance_mm"] == 0.7
+    assert report["configuration"]["alignment_tolerance_mm"] == 1.1
     assert report["configuration"]["max_alignment_passes"] == 3
 
 

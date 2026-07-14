@@ -13,7 +13,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from answercard.layout import plan_answer_pages
-from answercard.frame_alignment import DEFAULT_ALIGNMENT_TOLERANCE_MM
+from answercard.frame_alignment import (
+    DEFAULT_ALIGNMENT_TOLERANCE_MM,
+    load_alignment_pass_summaries,
+)
 from answercard.pipeline_timing import PipelineTimer
 from answercard.schema import AnswerCardSpec, load_spec
 from answercard.visual_requirements import (
@@ -113,6 +116,15 @@ def finalize_pipeline(
     failure: Exception | None = None
 
     try:
+        try:
+            alignment_history = load_alignment_pass_summaries(
+                alignment_report,
+                tolerance_mm=alignment_tolerance_mm,
+            )
+        except (OSError, ValueError, json.JSONDecodeError):
+            alignment_history = []
+        if alignment_history:
+            timer.update_result({"alignment_history": alignment_history})
         spec = _run_stage(timer, "validate_qspec", load_spec, qspec)
         visual_result = _run_stage(
             timer,
@@ -162,6 +174,7 @@ def finalize_pipeline(
             "alignment_pass": alignment_result["pass"],
             "top_spread_mm": alignment_result["top_spread_mm"],
             "bottom_spread_mm": alignment_result["bottom_spread_mm"],
+            "alignment_history": alignment_history,
             "alignment_tolerance_mm": alignment_tolerance_mm,
             "default_alignment_tolerance_mm": DEFAULT_ALIGNMENT_TOLERANCE_MM,
             "visual_requirement_counts": visual_requirement_counts(visual_result),
