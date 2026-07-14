@@ -57,6 +57,15 @@ def test_default_output_collision_gets_paper_suffix(tmp_path: Path) -> None:
     ]
 
 
+def test_default_title_strips_answer_marker_before_trailing_page_range() -> None:
+    assert (
+        batch.default_paper_title("第39届Chemy模拟试题04参考答案_p44-59")
+        == "第39届Chemy模拟试题04答题卡"
+    )
+    assert batch.default_paper_title("模拟试题详解-P102—121") == "模拟试题答题卡"
+    assert batch.default_paper_title("模拟试题_p44-59") == "模拟试题_p44-59答题卡"
+
+
 def test_metadata_overrides_and_rejects_unknown_or_duplicate_names(tmp_path: Path) -> None:
     source = _inputs(tmp_path, "a.pdf", "b.pdf")
     metadata = source / "answercard-batch.yaml"

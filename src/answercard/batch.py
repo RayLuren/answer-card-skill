@@ -41,7 +41,8 @@ SAFE_ERROR_MESSAGES = {
 }
 
 _TITLE_SUFFIX_RE = re.compile(
-    r"(?:[\s._\-—–]+)?(?:参考答案|答案|详解)\s*$",
+    r"(?:[\s._\-—–]+)?(?:参考答案|答案|详解)"
+    r"(?:[\s._\-—–]+(?:p\s*)?\d+\s*[\-—–]\s*\d+)?\s*$",
     flags=re.IGNORECASE,
 )
 _TRAILING_SEPARATOR_RE = re.compile(r"[\s._\-—–]+$")
