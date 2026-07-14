@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "answer-card-skill"
+version = "0.1.0"
+description = "Reusable LaTeX answer-card generation skill skeleton."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "jinja2",
+  "pypdf",
+  "pytest",
+  "pyyaml",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

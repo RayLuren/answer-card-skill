@@ -1,0 +1,4 @@
+interface:
+  display_name: "批量答题卡生成"
+  short_description: "用 Codex 安全批量生成空白答题卡与审计报告文件"
+  default_prompt: "Use $answer-card-skill to process a directory of reference-answer PDFs into blank validated answer-card PDFs."

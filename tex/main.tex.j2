@@ -1,0 +1,155 @@
+\documentclass[UTF8,fontset=none]{ctexart}
+
+\usepackage[
+  ((( spec.paper.page_size | lower )))paper,
+  top=((( spec.paper.margin.top ))),
+  bottom=((( spec.paper.margin.bottom ))),
+  left=((( spec.paper.margin.left ))),
+  right=((( spec.paper.margin.right )))
+]{geometry}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{graphicx}
+\usepackage{tabularx}
+\usepackage{xcolor}
+
+\setmainfont{Times New Roman}
+\setCJKmainfont[AutoFakeBold=3]{SimSun}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0pt}
+\renewcommand{\arraystretch}{1}
+
+\newcommand{\BodyFont}{\fontsize{10.5pt}{12.5pt}\selectfont\bfseries}
+\newcommand{\QuestionTitleFont}{\fontsize{10.5pt}{12.5pt}\selectfont\bfseries}
+\newcommand{\AnswerLabelFont}{\fontsize{10pt}{12pt}\selectfont\bfseries}
+\newcommand{\CoverTitleFont}{\fontsize{18pt}{22pt}\selectfont\bfseries}
+
+% Every final page carries a centered Arabic page number. Reuse
+% \QuestionTitleFont so page-number digits exactly match the question-number
+% and score digits in major-question headings.
+\setlength{\footskip}{7mm}
+\makeatletter
+\def\ps@answercard{%
+  \let\@oddhead\@empty
+  \let\@evenhead\@empty
+  \def\@oddfoot{\hfil{\QuestionTitleFont\thepage}\hfil}%
+  \let\@evenfoot\@oddfoot
+}
+\makeatother
+\pagestyle{answercard}
+
+\newlength{\FrameRuleWidth}
+\setlength{\FrameRuleWidth}{0.6pt}
+\newlength{\InnerRowGap}
+\setlength{\InnerRowGap}{5.25mm}
+\newlength{\ConstantsToFieldsGap}
+\setlength{\ConstantsToFieldsGap}{9mm}
+
+\definecolor{Ink}{HTML}{000000}
+\definecolor{Accent}{HTML}{000000}
+\definecolor{Rule}{HTML}{000000}
+\color{Ink}
+
+\newcommand{\fieldrow}[1]{%
+  {\AnswerLabelFont #1}\hspace{0.7em}\rule{0.72\linewidth}{0.6pt}\par\vspace{\InnerRowGap}%
+}
+
+\newcommand{\constantitem}[1]{%
+  {\fontspec{Times New Roman}\fontsize{10.5pt}{12.5pt}\selectfont\bfseries #1}%
+}
+\newcommand{\physvar}[1]{{\itshape #1}}
+
+\newlength{\AnswerLabelWidth}
+\setlength{\AnswerLabelWidth}{ ((( spec.style.label_width ))) }
+\newlength{\AnswerCellPadding}
+\setlength{\AnswerCellPadding}{1.5mm}
+\newlength{\QuestionTableGap}
+\setlength{\QuestionTableGap}{0.5mm}
+\setlength{\tabcolsep}{\AnswerCellPadding}
+\setlength{\arrayrulewidth}{ ((( spec.style.border_width ))) }
+\newlength{\AnswerImagePageCenterShift}
+\setlength{\AnswerImagePageCenterShift}{\dimexpr\AnswerLabelWidth+2\tabcolsep+\arrayrulewidth\relax}
+\divide\AnswerImagePageCenterShift by 2
+
+\newcolumntype{L}{>{\arraybackslash}p{\AnswerLabelWidth}}
+\newcolumntype{A}{>{\arraybackslash}p{\dimexpr\linewidth-\AnswerLabelWidth-4\tabcolsep-3\arrayrulewidth\relax}}
+\newcolumntype{Y}{>{\centering\arraybackslash}X}
+
+\newcommand{\QuestionTitle}[4]{%
+  {\QuestionTitleFont 第 #1 题 #2（#3 分\if\relax\detokenize{#4}\relax\else，占 #4\%\fi）。}\par
+  \nopagebreak[4]%
+  \vspace{\QuestionTableGap}%
+}
+
+\newcommand{\AnswerTableStart}{%
+  \noindent
+  \begin{tabular}{|L|A|}
+  \hline
+}
+
+\newcommand{\AnswerTableEnd}{%
+  \end{tabular}\par
+}
+
+\newcommand{\AnswerLabelCell}[2]{%
+  \parbox[c][#2][c]{\AnswerLabelWidth}{\centering\AnswerLabelFont #1}%
+}
+
+\newcommand{\AnswerBodyCell}[1]{%
+  \parbox[c][#1][c]{\linewidth}{}%
+}
+
+\newcommand{\AnswerRow}[2]{%
+  \AnswerLabelCell{#1}{#2} & \AnswerBodyCell{#2} \\
+  \hline
+}
+
+% Post-processing row for user-supplied, approved prompt-side images.
+% Keep the original row height, leave 0.6mm above and below the image canvas,
+% and shift the image from the answer-cell center to the A4 page center.
+\newcommand{\AnswerImageRow}[3]{%
+  \AnswerLabelCell{#1}{#2} &%
+  \parbox[c][#2][c]{\linewidth}{%
+    \makebox[\linewidth][c]{%
+      \hspace*{-\AnswerImagePageCenterShift}%
+      \makebox[0pt][c]{%
+        \includegraphics[%
+          width=\dimexpr\linewidth-2\AnswerImagePageCenterShift\relax,%
+          height=\dimexpr#2-1.2mm\relax,%
+          keepaspectratio
+        ]{\detokenize{#3}}%
+      }%
+      \hspace*{\AnswerImagePageCenterShift}%
+    }%
+  } \\
+  \hline
+}
+
+\begin{document}
+\BodyFont
+
+((* if not spec.paper.omit_front_page *))
+((* include "front_page.tex.j2" *))
+((* endif *))
+
+((* for page in pages *))
+((* if not loop.first *))
+\par\newpage
+((* endif *))
+((* if page.top_spacer_mm > 0 *))
+\vspace*{((( "%.2f" | format(page.top_spacer_mm) )))mm}
+((* endif *))
+((* for planned_question in page.questions *))
+((* if planned_question.show_title *))
+\QuestionTitle{((( planned_question.question.id | latex_escape )))}{((( planned_question.question.title | question_title_suffix(planned_question.question.id) | latex_escape )))}{((( planned_question.question.score )))}{((( planned_question.question.percent if planned_question.question.percent is not none else "" )))}
+((* endif *))
+\AnswerTableStart
+((* for planned_block in planned_question.blocks *))
+\AnswerRow{((( planned_block.block.id | latex_escape )))}{((( planned_block.height )))}
+((* endfor *))
+\AnswerTableEnd
+((* endfor *))
+((* endfor *))
+
+\end{document}

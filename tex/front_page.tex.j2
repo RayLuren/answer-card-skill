@@ -1,0 +1,119 @@
+\newgeometry{
+  top=13mm,
+  bottom=13mm,
+  left=16mm,
+  right=16mm,
+  noheadfoot
+}
+
+% Skill-owned first page migrated from the accepted standalone prototype.
+\begin{center}
+  {\CoverTitleFont
+    ((( spec.paper.title | latex_escape )))
+  }\par
+\end{center}
+
+\vspace{4.8mm}
+
+\begingroup
+  \setlength{\tabcolsep}{1.2pt}
+  \renewcommand{\arraystretch}{1.58}
+  \setlength{\arrayrulewidth}{\FrameRuleWidth}
+  \BodyFont
+  \begin{tabularx}{\textwidth}{|
+    >{\centering\arraybackslash\bfseries}m{14mm}|
+    *{((( score_table.column_count )))}{Y|}}
+    \hline
+    \textcolor{Accent}{题号}
+((* for question in score_table.questions *))
+    & \textbf{((( question.id | latex_escape )))}
+((* endfor *))
+    & \textbf{总分} \\
+    \hline
+    原始分
+((* for question in score_table.questions *))
+    & ((( question.raw_score | score_number )))
+((* endfor *))
+    & ((( score_table.raw_total | score_number ))) \\
+    \hline
+    赋分
+((* for question in score_table.questions *))
+    & ((( question.assigned_score )))
+((* endfor *))
+    & ((( score_table.assigned_total ))) \\
+    \hline
+    得分
+((* for question in score_table.questions *))
+    &
+((* endfor *))
+    & \\
+    \hline
+  \end{tabularx}
+\endgroup
+
+\vspace{4.5mm}
+
+\begingroup
+  \setlength{\fboxsep}{3.2mm}
+  \setlength{\fboxrule}{\FrameRuleWidth}
+  \noindent\fcolorbox{Rule}{white}{%
+    \begin{minipage}{\dimexpr\textwidth-2\fboxsep-2\fboxrule\relax}
+      {\color{Accent}\QuestionTitleFont 考试须知}\par
+      \vspace{1.2mm}
+      \BodyFont
+      \begin{enumerate}[
+        labelindent=0pt,
+        leftmargin=*,
+        labelsep=0pt,
+        itemsep=0.35mm,
+        topsep=0pt,
+        parsep=0pt,
+        label={（\arabic*）}
+      ]
+        \item \textbf{答题时间 3 小时。}迟到超过半小时者不能进考场。开始考试后
+          1 小时内不得离场。时间到，把试卷（背面朝上）放在桌面上，立即起立撤离考场。
+        \item 试卷装订成册，不得拆散；不得用铅笔填写。
+        \item 姓名、考号和所属学校必须写在首页左侧指定位置。
+        \item 允许使用非编程计算器以及直尺等文具。
+      \end{enumerate}
+    \end{minipage}%
+  }
+\endgroup
+
+\vspace{4.5mm}
+
+\begin{center}
+  \includegraphics[width=148mm,keepaspectratio]{\detokenize{((( front_page_asset_path )))}}
+\end{center}
+
+\vspace{1.8mm}
+
+\begin{center}
+\begin{minipage}{166mm}
+  \centering
+  \begin{tabular}{@{}l@{\hspace{18mm}}l@{}}
+    \constantitem{\physvar{R} = 8.3145 J mol\textsuperscript{-1} K\textsuperscript{-1}}
+    &
+    \constantitem{\physvar{N}\textsubscript{A} = 6.0221 × 10\textsuperscript{23} mol\textsuperscript{-1}}
+    \\[\InnerRowGap]
+    \constantitem{\physvar{F} = 96485 C mol\textsuperscript{-1}}
+    &
+    \constantitem{\physvar{h} = 6.6261 × 10\textsuperscript{-34} J s}
+    \\[\InnerRowGap]
+    \constantitem{\physvar{c} = 2.9979 × 10\textsuperscript{8} m s\textsuperscript{-1}}
+    &
+    \constantitem{\physvar{p}\textsuperscript{°} = 100 kPa}
+  \end{tabular}
+\end{minipage}
+
+\vspace{\ConstantsToFieldsGap}
+
+\begin{minipage}{86mm}
+  \AnswerLabelFont
+  \fieldrow{姓名：}
+  \fieldrow{学校：}
+  \fieldrow{年级：}
+\end{minipage}
+\end{center}
+
+\restoregeometry

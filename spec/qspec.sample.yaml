@@ -1,0 +1,61 @@
+schema_version: 1
+
+paper:
+  title: "第39届 Chemy 化学奥林匹克模拟试题1答题纸"
+  page_size: "A4"
+  omit_front_page: true
+  total_score: 29
+  margin:
+    top: "12mm"
+    bottom: "12mm"
+    left: "10mm"
+    right: "10mm"
+
+style:
+  label_width: "13mm"
+  border_width: "0.6pt"
+  box_gap: "1.5mm"
+  title_gap: "2mm"
+
+questions:
+  - id: "1"
+    title: "元素化学"
+    score: 22
+    percent: 76
+    blocks:
+      - id: "1-1"
+        kind: "equation"
+        height: "22mm"
+
+      - id: "1-2-1"
+        kind: "formula"
+        height: "14mm"
+
+      - id: "1-2-2"
+        kind: "drawing"
+        height: "42mm"
+
+      - id: "1-2-3"
+        kind: "equation"
+        height: "42mm"
+
+      - id: "1-3"
+        kind: "equation"
+        height: "40mm"
+
+      - id: "1-4"
+        kind: "equation"
+        height: "55mm"
+
+  - id: "2"
+    title: "氟代试剂"
+    score: 7
+    percent: 24
+    blocks:
+      - id: "2-1"
+        kind: "equation"
+        height: "35mm"
+
+      - id: "2-2"
+        kind: "drawing"
+        height: "45mm"
