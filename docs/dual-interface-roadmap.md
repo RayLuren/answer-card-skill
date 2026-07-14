@@ -19,13 +19,14 @@ Codex v1 已补齐：
 - `scripts/batch_pipeline.py` 提供目录级 prepare/status/accept/build/fail/report 产品入口。
 - 不可变 manifest、原子 state、严格 JSON job 和 `run-report.json` 构成宿主无关边界。
 - `SKILL.md` 是简洁产品入口，Codex 专属调度位于 `references/codex-batch-orchestration.md`。
+- GitHub 默认首页已经改为中文，并提供结构一致的英文入口；详细使用、工作流、数据契约、验收和开发说明已拆分到 `docs/`。
 
 仍存在的不足：
 
 - `references/change-routing.md` 尚未创建。
 - 尚未提供统一的环境与能力预检命令。
 - 当前命令和示例偏向 Windows/PowerShell，跨平台调用方式尚未收敛。
-- 尚未提供供人类界面和 AI Agent 界面共同使用的统一运行报告及稳定错误分类。
+- 已有 `pipeline_report.json`、`task-report.md` 和批处理 `run-report.json`，但未来统一 CLI/service 层仍需收敛稳定错误分类和通用机器输出。
 
 ## 核心设计原则
 
@@ -46,15 +47,23 @@ AI Agent Skill -------+
 
 ```text
 answer-card-skill/
-├── README.md                     # 面向用户的项目入口
+├── README.md                     # 中文 GitHub 项目入口
+├── README.en.md                  # 英文项目入口
 ├── SKILL.md                      # 面向 AI Agent 的工作流入口
+├── CONTRIBUTING.md               # 开发与贡献规则
 ├── pyproject.toml
 ├── docs/
-│   └── dual-interface-roadmap.md # 本路线图
+│   ├── README.md                 # 文档导航
+│   ├── getting-started.md        # 安装和首次构建
+│   ├── user-guide.md             # 单份、批量和配图后处理
+│   ├── workflow.md               # 阶段边界和文件流转
+│   ├── data-contracts.md         # 结构化数据契约
+│   ├── validation-and-reporting.md
+│   ├── development.md
+│   ├── dual-interface-roadmap.md # 本路线图
+│   └── history/                  # 非现行历史资料
 ├── references/
 │   ├── change-routing.md         # AI 维护与定制需求路由
-│   ├── contracts.md              # outline、AI layout、qspec 和报告契约
-│   ├── safety-boundaries.md      # 答案泄露与临时证据安全规则
 │   └── platform-compatibility.md # Agent 平台和模型/API 兼容说明
 ├── src/answercard/
 │   ├── service.py                # 共享应用服务层
@@ -73,7 +82,9 @@ answer-card-skill/
     └── local_web/
 ```
 
-以上结构表示发展方向，并不要求立即创建所有文件。只有在相应实施阶段经过确认后，才新增对应文件。
+以上结构同时包含已经落地的文档层和未来代码方向。`change-routing.md`、`platform-compatibility.md`、service、统一 CLI 和可选 UI 仍应在对应阶段经过确认后再创建。
+
+文档职责遵循一个权威来源原则：README 只提供入口和摘要，稳定的人类可读细节放在 `docs/`，Agent 执行合同放在 `SKILL.md` 与 `references/`。除中英文首页外，不建立整套逐文件翻译副本，以减少事实漂移。
 
 ## 共享应用服务层
 
@@ -266,7 +277,7 @@ AI 布局判断本身仍属于模型任务。确定性工具可以负责准备�
 
 - 为 `SKILL.md` 确定最终的 Agent Skills frontmatter。
 - 创建 `references/change-routing.md`。
-- 只有在现有代码契约无法被简洁引用时，才创建 `references/contracts.md`。
+- 数据契约的人类可读说明已经集中在 `docs/data-contracts.md`；只有 Agent 确实需要不同的机器执行合同且现有 schema/文档无法被简洁引用时，才创建额外 reference。
 - 在 `SKILL.md` 中为每个 reference 文件写明明确的读取条件。
 - 验证 Skill 包，并使用真实风格的用户请求进行前向测试。
 

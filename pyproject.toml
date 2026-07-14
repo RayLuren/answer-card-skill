@@ -5,8 +5,9 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "answer-card-skill"
 version = "0.1.0"
-description = "Reusable LaTeX answer-card generation skill skeleton."
+description = "Auditable Python and LaTeX pipeline for generating blank answer-card PDFs."
 readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.11"
 dependencies = [
   "jinja2",
@@ -14,6 +15,12 @@ dependencies = [
   "pytest",
   "pyyaml",
 ]
+
+[project.urls]
+Homepage = "https://github.com/RayLuren/answer-card-skill"
+Documentation = "https://github.com/RayLuren/answer-card-skill/blob/main/docs/README.md"
+Repository = "https://github.com/RayLuren/answer-card-skill.git"
+Issues = "https://github.com/RayLuren/answer-card-skill/issues"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

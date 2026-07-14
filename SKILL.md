@@ -12,7 +12,7 @@ Treat `scripts/batch_pipeline.py` as the product interface. For every directory 
 Accept a request such as:
 
 ```text
-调用 D:\Work\answer-card\answer-card-skill，
+调用 <本地 answer-card-skill 项目目录>，
 处理 <输入目录> 下的答案 PDF，
 输出到 <输出根目录>。
 ```
