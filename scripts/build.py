@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+from typing import Any, Mapping
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -39,6 +40,7 @@ def build_answer_card(
     align_pages: bool = False,
     max_alignment_passes: int = DEFAULT_MAX_ALIGNMENT_PASSES,
     alignment_tolerance_mm: float = DEFAULT_ALIGNMENT_TOLERANCE_MM,
+    image_bindings: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> Path:
     """Validate qspec, render LaTeX, compile it with xelatex, and return the PDF path."""
 
@@ -46,7 +48,7 @@ def build_answer_card(
     tex_path = destination_dir / DEFAULT_TEX_NAME
     pdf_path = destination_dir / DEFAULT_PDF_NAME
 
-    render_tex(spec_path, tex_path)
+    render_tex(spec_path, tex_path, image_bindings=image_bindings)
     _compile_tex(tex_path, pdf_path, destination_dir, xelatex=xelatex)
     if align_pages:
         _align_compiled_pages(
@@ -57,6 +59,7 @@ def build_answer_card(
             xelatex=xelatex,
             max_passes=max_alignment_passes,
             tolerance_mm=alignment_tolerance_mm,
+            image_bindings=image_bindings,
         )
     return pdf_path
 
@@ -70,6 +73,7 @@ def _align_compiled_pages(
     xelatex: str,
     max_passes: int,
     tolerance_mm: float,
+    image_bindings: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> None:
     spec = load_spec(spec_path)
     expected_body_page_count = len(plan_answer_pages(spec))
@@ -141,6 +145,7 @@ def _align_compiled_pages(
             tex_path,
             page_height_adjustments_mm=page_height_adjustments,
             page_top_spacers_mm=page_top_spacers,
+            image_bindings=image_bindings,
         )
         _compile_tex(tex_path, pdf_path, build_dir, xelatex=xelatex)
 

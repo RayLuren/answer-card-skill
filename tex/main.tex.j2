@@ -71,6 +71,8 @@
 \newlength{\AnswerImagePageCenterShift}
 \setlength{\AnswerImagePageCenterShift}{\dimexpr\AnswerLabelWidth+2\tabcolsep+\arrayrulewidth\relax}
 \divide\AnswerImagePageCenterShift by 2
+\newlength{\AnswerImageSlotWidth}
+\newlength{\AnswerImageScaledHeight}
 
 \newcolumntype{L}{>{\arraybackslash}p{\AnswerLabelWidth}}
 \newcolumntype{A}{>{\arraybackslash}p{\dimexpr\linewidth-\AnswerLabelWidth-4\tabcolsep-3\arrayrulewidth\relax}}
@@ -106,8 +108,8 @@
 }
 
 % Post-processing row for user-supplied, approved prompt-side images.
-% Keep the original row height, leave 0.6mm above and below the image canvas,
-% and shift the image from the answer-cell center to the A4 page center.
+% Keep the original row height, leave at least 0.6mm on all four sides of the
+% image canvas, and shift it from the answer-cell center to the A4 page center.
 \newcommand{\AnswerImageRow}[3]{%
   \AnswerLabelCell{#1}{#2} &%
   \parbox[c][#2][c]{\linewidth}{%
@@ -115,7 +117,7 @@
       \hspace*{-\AnswerImagePageCenterShift}%
       \makebox[0pt][c]{%
         \includegraphics[%
-          width=\dimexpr\linewidth-2\AnswerImagePageCenterShift\relax,%
+          width=\dimexpr\linewidth-2\AnswerImagePageCenterShift-1.2mm\relax,%
           height=\dimexpr#2-1.2mm\relax,%
           keepaspectratio
         ]{\detokenize{#3}}%
@@ -123,6 +125,51 @@
       \hspace*{\AnswerImagePageCenterShift}%
     }%
   } \\
+  \hline
+}
+
+% Deterministic approved special placement: repeat one approved clean asset in
+% a single horizontal row. The caller supplies the audited count, gap, total
+% gap and repeated graphics body.
+\newcommand{\AnswerImageRepeatGraphic}[2]{%
+  \includegraphics[%
+    width=\AnswerImageSlotWidth,%
+    height=\dimexpr#2-1.2mm\relax,%
+    keepaspectratio
+  ]{\detokenize{#1}}%
+}
+
+\newcommand{\AnswerImageRepeatRow}[6]{%
+  \AnswerLabelCell{#1}{#2} &%
+  \parbox[c][#2][c]{\linewidth}{%
+    \setlength{\AnswerImageSlotWidth}{\dimexpr\linewidth-2\AnswerImagePageCenterShift-1.2mm-#5\relax}%
+    \divide\AnswerImageSlotWidth by #3%
+    \makebox[\linewidth][c]{%
+      \hspace*{-\AnswerImagePageCenterShift}%
+      \makebox[0pt][c]{#6}%
+      \hspace*{\AnswerImagePageCenterShift}%
+    }%
+  } \\
+  \hline
+}
+
+% Approved anchored placements. #4 is the audited fraction of the answer-row
+% height and #5 is the minimum edge clearance.
+\newcommand{\AnswerImageTopRightRow}[5]{%
+  \AnswerLabelCell{#1}{#2} &%
+  \setlength{\AnswerImageScaledHeight}{#4\dimexpr#2\relax}%
+  \parbox[t][#2][t]{\linewidth}{\makebox[\linewidth][r]{%
+    \includegraphics[width=\dimexpr\linewidth-2#5\relax,height=\AnswerImageScaledHeight,keepaspectratio]{\detokenize{#3}}\hspace*{#5}}} \\
+  \hline
+}
+
+\newcommand{\AnswerImageBottomCenterRow}[5]{%
+  \AnswerLabelCell{#1}{#2} &%
+  \setlength{\AnswerImageScaledHeight}{#4\dimexpr#2\relax}%
+  \parbox[c][#2][c]{\linewidth}{\vspace*{\fill}\makebox[\linewidth][c]{%
+    \hspace*{-\AnswerImagePageCenterShift}%
+    \includegraphics[width=\dimexpr\linewidth-2\AnswerImagePageCenterShift-2#5\relax,height=\AnswerImageScaledHeight,keepaspectratio]{\detokenize{#3}}%
+    \hspace*{\AnswerImagePageCenterShift}}\vspace*{#5}} \\
   \hline
 }
 
@@ -146,7 +193,22 @@
 ((* endif *))
 \AnswerTableStart
 ((* for planned_block in planned_question.blocks *))
+((* set image_binding = image_bindings.get(planned_block.block.id) *))
+((* if image_binding and image_binding.mode == "horizontal_repeat" *))
+\AnswerImageRepeatRow{((( planned_block.block.id | latex_escape )))}{((( planned_block.height )))}{((( image_binding.repeat_count )))}{((( image_binding.gap_mm )))mm}{((( image_binding.total_gap_mm )))mm}{%
+((* for repeat_index in range(image_binding.repeat_count) *))
+\AnswerImageRepeatGraphic{((( image_binding.asset_path )))}{((( planned_block.height )))}((* if not loop.last *))\hspace{((( image_binding.gap_mm )))}mm((* endif *))%
+((* endfor *))
+}
+((* elif image_binding and image_binding.mode == "top_right" *))
+\AnswerImageTopRightRow{((( planned_block.block.id | latex_escape )))}{((( planned_block.height )))}{((( image_binding.asset_path )))}{((( image_binding.height_ratio )))}{((( image_binding.clearance_mm )))mm}
+((* elif image_binding and image_binding.mode == "bottom_center" *))
+\AnswerImageBottomCenterRow{((( planned_block.block.id | latex_escape )))}{((( planned_block.height )))}{((( image_binding.asset_path )))}{((( image_binding.height_ratio )))}{((( image_binding.clearance_mm )))mm}
+((* elif image_binding *))
+\AnswerImageRow{((( planned_block.block.id | latex_escape )))}{((( planned_block.height )))}{((( image_binding.asset_path )))}
+((* else *))
 \AnswerRow{((( planned_block.block.id | latex_escape )))}{((( planned_block.height )))}
+((* endif *))
 ((* endfor *))
 \AnswerTableEnd
 ((* endfor *))

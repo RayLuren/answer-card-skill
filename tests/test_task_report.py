@@ -113,7 +113,7 @@ def test_task_report_records_all_stages_and_tolerance_change(tmp_path: Path) -> 
     assert "没有题目使用 `unknown` 长框回退" in text
     assert text.index("## 一分钟总览") < text.index("## 任务概览")
     assert "明确待补图 1 份" in text
-    assert "| 模拟试题 01 答题卡 | 7-3-1 | — | 通过 |" in text
+    assert "| 模拟试题 01 答题卡 | 7-3-1 | — | — | — | 通过 |" in text
 
 
 def test_task_report_details_every_failed_alignment_pass(tmp_path: Path) -> None:
@@ -252,8 +252,8 @@ def test_task_report_lists_visual_items_for_failed_paper_from_manifest(
     output = write_task_report([source], tmp_path / "task-report.md")
     text = output.read_text(encoding="utf-8")
 
-    assert "| 构建失败但需要补图卷 | 1-1 | 1-2 | 失败 |" in text
-    assert "| 1-1 | 在既有图上标记或连线 | 示意图 | 待人工补图后缩放并重编译 |" in text
+    assert "| 构建失败但需要补图卷 | 1-1 | — | — | 1-2 | 失败 |" in text
+    assert "| 1-1 | 在既有图上标记或连线 | 示意图 | 待人工补图后缩放并重编译（先生成 clean 图片并整卷审批） |" in text
     assert "| 1-2 | 待视觉复核 | 待确认 | 人工复核后决定是否补图 |" in text
     assert "配图状态无法确认" not in text
 
@@ -369,3 +369,59 @@ def test_task_report_marks_user_supplied_visual_as_embedded(tmp_path: Path) -> N
     quick_overview = text.split("## 任务概览", maxsplit=1)[0]
     assert "没有已确认的待补图卷子" in quick_overview
     assert "7-3-1" not in quick_overview
+
+
+def test_task_report_audits_binding_failure_special_layout_and_height(tmp_path: Path) -> None:
+    source = _write_report(
+        tmp_path / "pipeline_report.json",
+        label="审批后配图卷",
+        tolerance=1.1,
+    )
+    data = json.loads(source.read_text(encoding="utf-8"))
+    data["result"]["prompt_image_binding"] = {
+        "status": "failed",
+        "failure_code": "BINDING_VALIDATION_FAILED",
+        "pending_visual_item_ids": [],
+        "approved_visual_item_ids": ["7-3-1"],
+        "embedded_visual_item_ids": [],
+        "failed_visual_item_ids": ["7-3-1"],
+        "non_default_placements": [
+            {"id": "7-3-1", "mode": "horizontal_repeat", "repeat_count": 3, "gap_mm": 0}
+        ],
+        "height_overrides": [{"id": "7-3-1", "from": "47mm", "to": "52mm"}],
+    }
+    source.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+    output = write_task_report([source], tmp_path / "task-report.md")
+    text = output.read_text(encoding="utf-8")
+
+    assert "| 审批后配图卷 | — | — | 7-3-1 | — | 配图绑定失败 |" in text
+    assert "正式 PDF 未被替换" in text
+    assert "非默认图片排列审计" in text
+    assert "| 7-3-1 | horizontal_repeat | 3 | 0.000 mm |" in text
+    assert "框高覆盖审计" in text
+    assert "| 7-3-1 | 47mm | 52mm |" in text
+
+
+def test_task_report_treats_approved_cancellation_as_complete(tmp_path: Path) -> None:
+    source = _write_report(
+        tmp_path / "pipeline_report.json",
+        label="取消配图卷",
+        tolerance=1.1,
+    )
+    data = json.loads(source.read_text(encoding="utf-8"))
+    data["result"]["visual_asset_status"] = "cancelled"
+    data["result"]["prompt_image_binding"] = {
+        "status": "cancelled",
+        "approved_visual_item_ids": [],
+        "embedded_visual_item_ids": [],
+        "failed_visual_item_ids": [],
+        "cancelled_visual_item_ids": ["7-3-1"],
+    }
+    source.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+    output = write_task_report([source], tmp_path / "task-report.md")
+    text = output.read_text(encoding="utf-8")
+
+    assert "明确待补图 0 份" in text
+    assert "已审批取消配图" in text

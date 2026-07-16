@@ -11,17 +11,18 @@ A blank answer-card generator for structured examinations such as chemistry comp
 
 - Process a directory of arbitrarily named first-level PDFs into blank answer cards.
 - Keep an auditable intermediate layer through `outline.json`, `ai_layout.json`, and qspec.
+- Generate blocks only for leaf item ids in a hierarchy, with schema guards against parent/descendant collisions.
 - Use a visual-capable AI component to judge block layout, height, and prompt-side visual requirements.
 - Render the first page, answer body, and page numbers deterministically with Jinja2 and XeLaTeX.
 - Perform whole-block pagination, frame alignment, page preview rendering, and final artifact validation.
 - Produce answer-free pipeline records and one task-level Markdown report.
-- Stop at a no-image draft when prompt visuals are required, pending human-approved prompt-side assets.
+- Stop first at a no-image draft when prompt visuals are required, create sibling clean assets through a deterministic CLI, then use a strict manifest for approved clean/original assets, cancellations, structural overrides, and fixed placements; publish only validated results atomically.
 
 ## Project status
 
-The repository is an operational engineering version. Its Codex-hosted directory workflow is usable and has completed real-paper and batch forward tests. Frame alignment is measured at `200 DPI` with a current default tolerance of `1.1 mm`.
+The current version is `v0.2.0`. On 2026-07-15, one real-paper end-to-end trial passed the hierarchical-id fix, 12-page PDF build, previews, `1.1 mm` frame alignment, and final validation. Frame alignment remains measured at `200 DPI`. The repository is an operational engineering version with a usable Codex-hosted directory workflow, deterministic clean-image preparation, and audited post-approval image binding. See the [changelog](CHANGELOG.md) for versioned changes.
 
-The main remaining work is to add auditable post-approval image binding, rerun the 19-paper validation set under the new `1.1 mm` frame-alignment default, harden interrupted-run recovery, broaden platform/model coverage, and finalize Skill packaging after the production contract stabilizes.
+Auditable post-approval image binding is implemented. The main remaining work is to rerun the 19-paper validation set under the new `1.1 mm` frame-alignment default, harden interrupted-run recovery, broaden platform/model coverage, and finalize Skill packaging after the production contract stabilizes.
 
 The detailed roadmap is maintained in Chinese in [the human/Agent interface roadmap](docs/dual-interface-roadmap.md).
 
@@ -93,7 +94,14 @@ flowchart TD
     O -- Yes --> P[Write task report exactly once]
     P --> Q{Prompt visuals required?}
     Q -- No --> R[Delivery complete]
-    Q -- Yes --> S[Deliver no-image draft and await approved assets]
+    Q -- Yes --> S[Deliver no-image draft]
+    S --> T[prepare_clean_image creates sibling name-clean.png assets]
+    T --> U{All clean assets for the paper approved?}
+    U -- No --> T
+    U -- Yes --> V[Validate prompt_image_binding and hashes]
+    V --> W[Isolated repagination build alignment preview and finalization]
+    W -- Failed --> X[Retain diagnostics and preserve formal PDF]
+    W -- Passed --> Y[Atomically replace formal PDF and update reports]
 ```
 
 See the Chinese [workflow guide](docs/workflow.md) for stage ownership and artifact flow.
@@ -106,6 +114,8 @@ See the Chinese [workflow guide](docs/workflow.md) for stage ownership and artif
 | `ai_layout.json` | Validated block layout and fixed visual classifications |
 | `visual_requirements.json` | Deterministic projection of prompt-visual requirements |
 | `qspec.draft.yaml` | Human-auditable answer-card specification |
+| `prompt_image_binding.json` | Whole-paper clean/original assets, hashes, cancellations, structural overrides, and fixed placements |
+| `qspec.binding.yaml` | Auditable adjusted copy; the original qspec remains unchanged |
 | `answercard.tex` / `answercard.pdf` | LaTeX source and blank answer-card PDF |
 | `pages/page-*.png` | Stable one-based final-page previews |
 | `pipeline_report.json` | Per-paper answer-free validation record |
@@ -122,6 +132,7 @@ See the Chinese [workflow guide](docs/workflow.md) for stage ownership and artif
 | [Data contracts](docs/data-contracts.md) | outline, AI layout, visual requirements, and qspec |
 | [Validation and reporting](docs/validation-and-reporting.md) | Alignment, finalization, timing, and reports |
 | [Development](docs/development.md) | Repository layout, tests, and engineering boundaries |
+| [Changelog](CHANGELOG.md) | Versions, release dates, and user-visible changes |
 | [Roadmap](docs/dual-interface-roadmap.md) | Human and Agent interface roadmap |
 | [Codex orchestration contract](references/codex-batch-orchestration.md) | Worker, concurrency, acceptance, and retry rules |
 

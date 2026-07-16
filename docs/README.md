@@ -19,6 +19,7 @@
 ## 我要开发或维护项目
 
 - [开发指南](development.md)：目录结构、测试入口、跨盘符行为和安全开发边界。
+- [变更日志](../CHANGELOG.md)：版本号、发布日期和用户可见变化。
 - [贡献指南](../CONTRIBUTING.md)：提交范围、测试和文档同步要求。
 - [Codex 批量调度合同](../references/codex-batch-orchestration.md)：Codex worker、并发、重试和主 Agent 接纳规则。
 - `SKILL.md`：面向 AI Agent 的最短产品入口。

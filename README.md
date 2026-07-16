@@ -11,22 +11,22 @@
 
 - 从任意命名的第一层 PDF 目录生成一批空白答题卡。
 - 使用 `outline.json`、`ai_layout.json` 和 qspec 形成可审计的中间层。
+- 层级题号只为实际叶子分问生成答题块，并在后续 schema 中拒绝父子 ID 共存。
 - 由具备视觉能力的 AI 判断答题块类型、高度和题目配图需求。
 - 使用 Jinja2 和 XeLaTeX 确定性生成首页、答题区和页码。
 - 自动进行整块分页、页框对齐、页面预览和最终产物校验。
 - 输出不含答案内容的流水线报告和任务级 Markdown 总览。
-- 当题目需要预印图形时，先交付无图初稿，等待人工提供获准的题面侧素材。
+- 当题目需要预印图形时，先交付无图初稿；通过独立 CLI 确定性生成同目录 clean 图片，整卷获批后再由严格 manifest 处理 clean/获准原图、固定定位、取消项或结构覆盖，验证后才原子发布。
 
 ## 当前成熟度
 
-项目目前是可运行的工程版本，Codex 托管的目录批处理流程已经可用，并完成过真实试卷和批量前向测试。页框对齐以 `200 DPI` 测量，当前默认容差为 `1.1 mm`。
+当前版本为 `v0.2.0`。2026-07-15 已完成一份真实试卷的单卷全流程验证，层级题号修复、12 页 PDF 构建、预览、`1.1 mm` 页框对齐和最终验收均通过。页框对齐仍以 `200 DPI` 测量。项目目前是可运行的工程版本，Codex 托管的目录批处理流程、确定性 clean 图片准备和审批后统一配图均已实现。版本变化见[变更日志](CHANGELOG.md)。
 
-当前仍需重点完成：
+经人工批准后的可审计配图绑定已实现。当前仍需重点完成：
 
-1. 实现经人工批准后的可审计配图绑定阶段。
-2. 使用新的 `1.1 mm` 默认页框对齐标准重新验证 19 份批量样本。
-3. 继续加强中断恢复、跨平台和不同视觉模型/Agent 宿主的兼容测试。
-4. 在生产契约稳定后完成正式 Skill 打包。
+1. 使用新的 `1.1 mm` 默认页框对齐标准重新验证 19 份批量样本。
+2. 继续加强中断恢复、跨平台和不同视觉模型/Agent 宿主的兼容测试。
+3. 在生产契约稳定后完成正式 Skill 打包。
 
 详细状态与后续计划见[人类界面与 AI Agent 界面建设路线图](docs/dual-interface-roadmap.md)。
 
@@ -36,7 +36,7 @@
 
 - Python 3.11 或更高版本
 - XeLaTeX，可通过系统 `PATH` 调用
-- 项目 Python 依赖：`jinja2`、`pypdf`、`pyyaml`、`pytest`
+- 项目 Python 依赖：`jinja2`、`pillow`、`pypdf`、`pyyaml`、`pytest`
 - PDF 页面预览：PyMuPDF
 - AI 布局阶段：能够直接检查渲染后 PDF 页面的视觉模型或可信视觉工具
 
@@ -100,7 +100,14 @@ flowchart TD
     O -- 是 --> P[只生成一次任务报告]
     P --> Q{需要预印图形?}
     Q -- 否 --> R[交付完成]
-    Q -- 是 --> S[交付无图初稿并等待获准素材]
+    Q -- 是 --> S[交付无图初稿]
+    S --> T[prepare_clean_image 生成同目录 原名-clean.png]
+    T --> U{同卷全部 clean 图片已审批?}
+    U -- 否 --> T
+    U -- 是 --> V[校验 prompt_image_binding 与文件哈希]
+    V --> W[隔离重新分页 编译 对齐 预览与终验]
+    W -- 失败 --> X[保留诊断 正式 PDF 不变]
+    W -- 通过 --> Y[原子替换正式 PDF 并更新报告]
 ```
 
 更完整的阶段职责和产物说明见[工作流说明](docs/workflow.md)。
@@ -113,6 +120,8 @@ flowchart TD
 | `ai_layout.json` | 经校验的答题块布局和固定配图分类 |
 | `visual_requirements.json` | 是否需要预印题面图形的确定性投影 |
 | `qspec.draft.yaml` | 可人工审计的答题卡规格 |
+| `prompt_image_binding.json` | 整卷获批 clean/原图、双重哈希、取消项、结构覆盖与固定定位 |
+| `qspec.binding.yaml` | 保留原 qspec 后生成的框高调整审计副本 |
 | `answercard.tex` / `answercard.pdf` | LaTeX 源文件和空白答题卡 PDF |
 | `pages/page-*.png` | 最终 PDF 的逐页预览 |
 | `pipeline_report.json` | 单份试卷的无答案验收记录 |
@@ -129,6 +138,7 @@ flowchart TD
 | [数据契约](docs/data-contracts.md) | outline、AI layout、visual requirements 和 qspec |
 | [验收与报告](docs/validation-and-reporting.md) | 页框对齐、finalize、计时和任务报告 |
 | [开发指南](docs/development.md) | 目录结构、测试方式和开发边界 |
+| [变更日志](CHANGELOG.md) | 版本号、发布日期和用户可见变化 |
 | [长期路线图](docs/dual-interface-roadmap.md) | 人类界面、Agent 界面和跨平台方向 |
 | [Codex 批量调度合同](references/codex-batch-orchestration.md) | Codex worker、并发、接纳和重试规则 |
 

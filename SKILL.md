@@ -33,6 +33,9 @@ Accept a request such as:
 4. As soon as one paper reaches `ai_layout_valid`, run `build --paper PAPER_ID`. Serialize local XeLaTeX builds while other visual workers continue.
 5. Use `fail-paper` for interrupted, unsafe, or incapable workers. Capacity shortage is a queue condition, not a paper failure.
 6. After every paper is `validated` or `failed`, run `report` exactly once. A repeated `report` call returns the existing reports without regenerating them.
+7. If the report requires prompt visuals, deliver the no-image draft. During preparation, run `prepare_clean_image.py` to create only sibling `<original>-clean.png` files; do not modify qspec, TeX, PDF, reports, or formal outputs. This deterministic command only composites transparency onto white and applies one global luminance threshold. Never crop, resize, rotate, inpaint, locally erase, redraw, complete content, or recover a prompt visual from an answer graphic.
+8. After every required clean asset for one paper is approved, create strict `prompt_image_binding.json`, run `bind_prompt_images.py check`, then run `bind` once for the whole paper. Manifest v2 may use `cleaned` or explicitly `approved_original` assets and fixed cancellation/merge/height/placement overrides; never bind a partial approval set or clean an approved-original asset.
+9. For a batch, bind papers individually but regenerate the aggregate task report exactly once after all binding attempts finish.
 
 The state flow is `prepared → awaiting_ai_layout → ai_layout_running → ai_layout_valid → building → validated`, with `failed` as the terminal failure state. A first recoverable attempt failure returns to `awaiting_ai_layout` with attempt 2.
 
@@ -41,7 +44,10 @@ The state flow is `prepared → awaiting_ai_layout → ai_layout_running → ai_
 - Retry invalid JSON, schema failure, tool interruption, or transient evidence-read failure exactly once in a new fresh-context worker.
 - Do not retry structural conflicts, changed source fingerprints, capability preflight failures, or safety refusals.
 - The required per-item `unknown` reinspection occurs inside one worker attempt and does not count as the whole-paper retry.
-- Stop at the no-image initial PDF. Report prompt-image requirements and wait for approved prompt-side assets; v1 does not bind images automatically.
+- Stop at the no-image initial PDF until every clean asset for that paper is approved.
+- A changed clean or binding-asset hash invalidates approval. Stop and require whole-paper reapproval.
+- Binding may use only the existing answer-free qspec and `visual_requirements.json`; do not reopen the reference answer or rerun AI layout judgment.
+- A failed build or publication must leave the formal PDF unchanged and retain safe diagnostics.
 
 ## Commands
 
@@ -52,6 +58,9 @@ The state flow is `prepared → awaiting_ai_layout → ai_layout_running → ai_
 .\.venv\Scripts\python scripts\batch_pipeline.py build RUN\batch_manifest.json [--paper PAPER_ID]
 .\.venv\Scripts\python scripts\batch_pipeline.py fail-paper RUN\batch_manifest.json PAPER_ID --code CODE
 .\.venv\Scripts\python scripts\batch_pipeline.py report RUN\batch_manifest.json
+.\.venv\Scripts\python scripts\prepare_clean_image.py SOURCE_IMAGE [--threshold 195]
+.\.venv\Scripts\python scripts\bind_prompt_images.py check prompt_image_binding.json --qspec QSPEC --visual-requirements VISUAL_REQUIREMENTS
+.\.venv\Scripts\python scripts\bind_prompt_images.py bind prompt_image_binding.json --qspec QSPEC --visual-requirements VISUAL_REQUIREMENTS --build-dir BUILD --formal-pdf FORMAL_PDF --pipeline-report PIPELINE_REPORT
 ```
 
 Run project tests only through:

@@ -8,6 +8,8 @@ from pathlib import Path
 import re
 from typing import Any, Iterable
 
+from answercard.item_id_hierarchy import leaf_item_ids
+
 
 QUESTION_HEADING_RE = re.compile(r"^第\s*([0-9０-９一二三四五六七八九十百]+)\s*题\s*([^\n]*)")
 SUBITEM_RE = re.compile(r"(?<![\d-])([1-9]\d*(?:-[1-9]\d*)+)(?![\d-])")
@@ -110,6 +112,11 @@ def parse_outline(pages: Iterable[TextPage], *, source: str | None = None) -> di
                 }
                 current_items_by_id[item_id] = item
                 current_question["items"].append(item)
+
+    for question in questions:
+        items = question["items"]
+        leaf_ids = set(leaf_item_ids(item["id"] for item in items))
+        question["items"] = [item for item in items if item["id"] in leaf_ids]
 
     return {
         "source": source,

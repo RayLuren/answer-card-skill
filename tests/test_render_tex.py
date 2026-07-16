@@ -68,7 +68,7 @@ def test_render_tex_contains_questions_and_blocks_without_answers(tmp_path: Path
     assert r"\newcommand{\AnswerImageRow}[3]{%" in tex
     assert r"\newlength{\AnswerImagePageCenterShift}" in tex
     assert r"height=\dimexpr#2-1.2mm\relax" in tex
-    assert r"width=\dimexpr\linewidth-2\AnswerImagePageCenterShift\relax" in tex
+    assert r"width=\dimexpr\linewidth-2\AnswerImagePageCenterShift-1.2mm\relax" in tex
     assert r"\QuestionTitle{1}{元素化学}{22}{76}" in tex
     assert r"\QuestionTitle{2}{氟代试剂}{7}{24}" in tex
     assert "第 1 题 元素化学（22 分，占 76%）" not in tex

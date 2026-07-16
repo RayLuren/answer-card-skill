@@ -195,6 +195,18 @@ def test_ai_layout_rejects_unknown_free_text_field() -> None:
         validate_ai_layout(data)
 
 
+def test_ai_layout_rejects_parent_and_descendant_item_ids() -> None:
+    data = _ai_layout()
+    parent = dict(data["questions"][0]["items"][0])
+    parent["id"] = "1-1"
+    descendant = dict(parent)
+    descendant["id"] = "1-1-1"
+    data["questions"][0]["items"] = [parent, descendant]
+
+    with pytest.raises(ValueError, match="parent id 1-1 and descendant id 1-1-1"):
+        validate_ai_layout(data)
+
+
 def test_ai_layout_to_qspec_rejects_score_mismatch(tmp_path: Path) -> None:
     outline_path = tmp_path / "outline.json"
     ai_layout_path = tmp_path / "ai_layout.json"

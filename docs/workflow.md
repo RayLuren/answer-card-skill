@@ -72,9 +72,17 @@ outline 和 AI layout 合并为 `spec/qspec.draft.yaml`，再通过 `src/answerc
 
 后续明细保留阶段耗时、冲突、非 100% 印刷总和、`unknown` 95mm fallback、参数偏差和逐 pass 对齐记录。
 
-## 配图后处理
+## 阶段 11：clean 图片准备与整卷审批
 
-自动流程交付无图初稿。若报告列出预印图形需求，等待人工提供获准的题面侧素材；随后只修改生成的 TeX，直接重编译并检查修改页及相邻页。不得重新读取答案内容或从答案图形恢复题面素材。
+自动流程先交付无图初稿。若报告列出预印图形需求，使用 `scripts/prepare_clean_image.py` 只在外部素材目录生成同目录 `<原名>-clean.png`；它只允许透明铺白、整图亮度转换和单一全局阈值二值化，并使用固定 PNG 编码稳定输出哈希。禁止裁切、缩放、旋转、局部擦除、修补、重绘、内容补全或语义修改。准备阶段不得修改 qspec、TeX、PDF 或报告，不得重新读取答案内容，也不得从完成的答案图形恢复题面素材。
+
+同卷所需 clean 图片确认后，建立严格 `prompt_image_binding.json`。v2 区分 `cleaned` 与 `approved_original`，固定批准源与最终 PNG 的 SHA-256，并可表达默认、横排、右上、底部居中、按框高比例缩放、取消配图、连续块合并和独立框高覆盖；不保存审批人、对话或自由文本。原始 qspec、AI layout 与视觉需求不改写，另存绑定审计副本。缺少必需 item、题号越界、文件缺失或哈希变化均停止执行并要求重新审批。
+
+## 阶段 12：隔离绑定、重新分页与原子发布
+
+`scripts/bind_prompt_images.py bind` 一次处理同卷全部获批图片。默认放置保留原框高；特殊横排可固定重复数和零或非零间距。所有模式均宽高双限制、保持纵横比、相对 A4 页面居中并在四边至少保留 `0.6 mm`。
+
+框高覆盖不修改原 qspec，而是写 `qspec.binding.yaml` 审计副本，然后仅从既有无答案结构重新执行分页、渲染、编译、默认 `1.1 mm` 页框对齐、预览和最终验收。成功后才原子替换正式 PDF，记录审批、嵌入、特殊排列和框高审计并清理临时目录；失败时正式 PDF 不变，诊断保留。单卷可立即重写任务报告；批量任务逐卷绑定后仍只聚合一次任务报告。
 
 ## 阶段与文件对应表
 
@@ -85,6 +93,9 @@ outline 和 AI layout 合并为 `spec/qspec.draft.yaml`，再通过 `src/answerc
 | 视觉 job | `batch.py`、固定 prompt | `ai_layout.attempt-N.json` |
 | AI layout 接纳 | `ai_layout_schema.py`、`ai_layout_audit.py` | `ai_layout.json` |
 | 配图需求 | `visual_requirements.py` | `visual_requirements.json` |
+| clean 图片准备 | `clean_image.py` / `prepare_clean_image.py` | 外部素材目录中的 `*-clean.png` |
+| 配图审批 | `prompt_image_binding.py` | `prompt_image_binding.json` |
+| 配图执行 | `bind_prompt_images.py`、`render_tex.py` | `qspec.binding.yaml`、绑定资产、正式 PDF |
 | qspec | `ai_layout_to_qspec.py`、`schema.py` | `qspec.draft.yaml` |
 | 分页 | `layout.py` | 内存中的页面计划 |
 | 渲染与编译 | `render_tex.py`、`build.py` | `answercard.tex`、`answercard.pdf` |

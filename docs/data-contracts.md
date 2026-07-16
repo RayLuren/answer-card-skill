@@ -20,6 +20,8 @@
 
 提取器必须过滤科学计数法等上下文中的伪小题号，例如 `× 10-4` 和 `10-12.67`。
 
+层级题号只保留实际叶子 item。若同一大题中同时出现 `6-3`、`6-3-1` 和 `6-3-2`，outline 只保留 `6-3-1`、`6-3-2`；父级 `6-3` 视为分组号，不生成独立答题块。skeleton、AI layout 和 qspec schema 均必须拒绝父级 ID 与其任一后代 ID 共存，以拦截旧产物或手写数据中的结构冲突。
+
 ## `ai_layout.skeleton.json`
 
 skeleton 由 outline 确定性生成，只锁定 question id、item id、顺序和分值。它不能预填或暗示 `kind`、`height`、百分比和视觉分类。

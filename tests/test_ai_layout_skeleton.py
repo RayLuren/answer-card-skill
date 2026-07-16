@@ -58,3 +58,22 @@ def test_skeleton_rejects_duplicate_item_ids() -> None:
         assert "duplicate ids" in str(exc)
     else:
         raise AssertionError("duplicate item ids must be rejected")
+
+
+def test_skeleton_rejects_parent_and_descendant_item_ids() -> None:
+    outline = {
+        "questions": [
+            {
+                "id": "6",
+                "score": 20,
+                "items": [{"id": "6-3"}, {"id": "6-3-1"}],
+            }
+        ]
+    }
+
+    try:
+        build_ai_layout_skeleton(outline)
+    except ValueError as exc:
+        assert "parent id 6-3 and descendant id 6-3-1" in str(exc)
+    else:
+        raise AssertionError("parent and descendant item ids must be rejected")

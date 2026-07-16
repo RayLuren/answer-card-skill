@@ -7,6 +7,8 @@ from pathlib import Path
 import re
 from typing import Any
 
+from answercard.item_id_hierarchy import first_parent_descendant_pair
+
 
 RESOLVED_KINDS = {
     "short_answer",
@@ -135,6 +137,7 @@ def validate_ai_layout(data: Any) -> dict[str, Any]:
         items = question.get("items")
         if not isinstance(items, list):
             raise ValueError(f"{context}.items must be a list")
+        question_item_ids: list[str] = []
         for item_index, item in enumerate(items):
             item_context = f"{context}.items[{item_index}]"
             if not isinstance(item, dict):
@@ -156,6 +159,7 @@ def validate_ai_layout(data: Any) -> dict[str, Any]:
             if item_id in seen_items:
                 raise ValueError(f"{item_context}.id duplicates {item_id}")
             seen_items.add(item_id)
+            question_item_ids.append(item_id)
             kind = _required_str(item, "kind", item_context)
             if kind not in ALLOWED_KINDS:
                 raise ValueError(f"{item_context}.kind must be an allowed kind")
@@ -185,6 +189,12 @@ def validate_ai_layout(data: Any) -> dict[str, Any]:
                 visual_requirement,
                 visual_type,
                 context=item_context,
+            )
+        parent_pair = first_parent_descendant_pair(question_item_ids)
+        if parent_pair is not None:
+            parent_id, descendant_id = parent_pair
+            raise ValueError(
+                f"{context}.items contains parent id {parent_id} and descendant id {descendant_id}"
             )
 
     # Do not rewrite printed evidence to force a total. The actual total is

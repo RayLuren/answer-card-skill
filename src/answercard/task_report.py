@@ -61,6 +61,8 @@ _STAGE_LABELS = {
     "validate_previews": "页面预览校验",
     "cleanup_temporary_artifacts": "清理临时证据",
     "prune_build_artifacts": "裁剪构建目录",
+    "bind_prompt_images_build": "审批后统一配图重建与页框对齐",
+    "bind_prompt_images_render_pages": "审批后配图页面预览",
 }
 
 
@@ -96,7 +98,10 @@ def render_task_report(
     if not reports:
         raise ValueError("at least one pipeline report is required")
 
-    all_passed = all(report.get("status") == "passed" for report in reports)
+    all_passed = all(
+        report.get("status") == "passed" and not _binding_failed(report)
+        for report in reports
+    )
     total_seconds = sum(
         float(report["total_duration_seconds"])
         for report in reports
@@ -186,15 +191,20 @@ def render_task_report(
 
 
 def _quick_overview_lines(reports: list[dict[str, Any]]) -> list[str]:
-    passed_count = sum(report.get("status") == "passed" for report in reports)
+    passed_count = sum(
+        report.get("status") == "passed" and not _binding_failed(report)
+        for report in reports
+    )
     failed_reports: list[tuple[int, dict[str, Any]]] = []
-    visual_rows: list[tuple[str, list[str], list[str], str]] = []
+    visual_rows: list[
+        tuple[str, list[str], list[str], list[str], list[str], str]
+    ] = []
     missing_visual_labels: list[str] = []
 
     for index, report in enumerate(reports, start=1):
         label = _safe_label(report.get("label"), index)
         result = report.get("result") if isinstance(report.get("result"), dict) else {}
-        if report.get("status") != "passed":
+        if report.get("status") != "passed" or _binding_failed(report):
             failed_reports.append((index, report))
 
         preprinted = result.get("preprinted_visual_items")
@@ -202,25 +212,36 @@ def _quick_overview_lines(reports: list[dict[str, Any]]) -> list[str]:
         if not isinstance(preprinted, list) or not isinstance(uncertain, list):
             missing_visual_labels.append(label)
             continue
-        embedded_ids = result.get("embedded_visual_item_ids")
-        embedded_id_set = (
-            {str(item_id) for item_id in embedded_ids}
-            if isinstance(embedded_ids, list)
-            else set()
-        )
+        approved_id_set, embedded_id_set, failed_id_set = _binding_item_sets(result)
+        cancelled_id_set = _binding_cancelled_ids(result)
+        required_ids = _visual_item_ids(preprinted)
         pending_ids = [
-            item_id
-            for item_id in _visual_item_ids(preprinted)
-            if item_id not in embedded_id_set
+            item_id for item_id in required_ids
+            if item_id not in approved_id_set and item_id not in cancelled_id_set
         ]
+        approved_ids = [
+            item_id
+            for item_id in required_ids
+            if item_id in approved_id_set
+            and item_id not in embedded_id_set
+            and item_id not in failed_id_set
+        ]
+        failed_ids = [item_id for item_id in required_ids if item_id in failed_id_set]
         uncertain_ids = _visual_item_ids(uncertain)
-        if pending_ids or uncertain_ids:
+        if pending_ids or approved_ids or failed_ids or uncertain_ids:
             visual_rows.append(
-                (label, pending_ids, uncertain_ids, _status_label(report.get("status")))
+                (
+                    label,
+                    pending_ids,
+                    approved_ids,
+                    failed_ids,
+                    uncertain_ids,
+                    "配图绑定失败" if _binding_failed(report) else _status_label(report.get("status")),
+                )
             )
 
-    explicit_visual_count = sum(bool(row[1]) for row in visual_rows)
-    uncertain_visual_count = sum(bool(row[2]) for row in visual_rows)
+    explicit_visual_count = sum(bool(row[1] or row[2] or row[3]) for row in visual_rows)
+    uncertain_visual_count = sum(bool(row[4]) for row in visual_rows)
     lines = [
         "## 一分钟总览",
         "",
@@ -236,13 +257,14 @@ def _quick_overview_lines(reports: list[dict[str, Any]]) -> list[str]:
     if visual_rows:
         lines.extend(
             [
-                "| 卷子 | 明确待补图题号 | 待确认题号 | 导出状态 |",
-                "| --- | --- | --- | --- |",
+                "| 卷子 | 待审批题号 | 已审批待执行 | 绑定失败 | 待确认题号 | 导出状态 |",
+                "| --- | --- | --- | --- | --- | --- |",
             ]
         )
-        for label, pending_ids, uncertain_ids, export_status in visual_rows:
+        for label, pending_ids, approved_ids, failed_ids, uncertain_ids, export_status in visual_rows:
             lines.append(
                 f"| {_escape_cell(label)} | {_format_id_summary(pending_ids)} | "
+                f"{_format_id_summary(approved_ids)} | {_format_id_summary(failed_ids)} | "
                 f"{_format_id_summary(uncertain_ids)} | {export_status} |"
             )
     else:
@@ -279,6 +301,10 @@ def _quick_failure_summary(
     report: dict[str, Any],
     result: dict[str, Any],
 ) -> tuple[str, str, str]:
+    binding = result.get("prompt_image_binding")
+    if isinstance(binding, dict) and binding.get("status") == "failed":
+        code = str(binding.get("failure_code") or "BINDING_FAILED")
+        return f"审批后统一配图失败（{code}）", "正式 PDF 未替换", "需修正后整卷重新执行"
     history = result.get("alignment_history")
     entries = [entry for entry in history if isinstance(entry, dict)] if isinstance(history, list) else []
     if entries and entries[-1].get("passed") is not True:
@@ -522,17 +548,22 @@ def _visual_requirement_lines(result: dict[str, Any]) -> list[str]:
         f"- 待视觉复核的小题：{len(uncertain)} 个。",
     ]
     asset_status = result.get("visual_asset_status")
-    embedded_ids = result.get("embedded_visual_item_ids")
-    embedded_id_set = (
-        {str(item_id) for item_id in embedded_ids}
-        if isinstance(embedded_ids, list)
-        else set()
-    )
+    approved_id_set, embedded_id_set, failed_id_set = _binding_item_sets(result)
+    cancelled_id_set = _binding_cancelled_ids(result)
+    binding = result.get("prompt_image_binding")
+    binding_status = binding.get("status") if isinstance(binding, dict) else None
     if preprinted:
-        if asset_status == "embedded":
+        if binding_status == "failed":
+            failure_code = binding.get("failure_code", "BINDING_FAILED")
+            status_line = f"- 当前处理状态：审批后统一绑定失败（{_escape_cell(failure_code)}）；正式 PDF 未被替换。"
+        elif binding_status == "cancelled":
+            status_line = "- 当前处理状态：本卷配图需求已按审批取消；正式 PDF 版式未改写。"
+        elif asset_status == "embedded":
             status_line = (
                 "- 当前处理状态：用户提供的题面底图已缩放放入对应答题框，带图版本已重新编译。"
             )
+        elif approved_id_set:
+            status_line = "- 当前处理状态：clean 图片已整卷审批，等待统一绑定执行。"
         else:
             status_line = (
                 "- 当前处理状态：无图初版已生成；等待人工在外部目录提供适合答题卡的题面底图，"
@@ -548,11 +579,16 @@ def _visual_requirement_lines(result: dict[str, Any]) -> list[str]:
         )
         for item in preprinted:
             item_id = str(item.get("id")) if isinstance(item, dict) else ""
-            handling = (
-                "已嵌入并重新编译"
-                if asset_status == "embedded" and item_id in embedded_id_set
-                else "待人工补图后缩放并重编译"
-            )
+            if item_id in embedded_id_set:
+                handling = "已嵌入并重新编译"
+            elif item_id in cancelled_id_set:
+                handling = "已审批取消配图"
+            elif item_id in failed_id_set:
+                handling = "审批后统一绑定失败，正式 PDF 未替换"
+            elif item_id in approved_id_set:
+                handling = "clean 图片已审批，待整卷统一执行"
+            else:
+                handling = "待人工补图后缩放并重编译（先生成 clean 图片并整卷审批）"
             lines.append(_visual_item_row(item, handling))
     else:
         lines.append("- 当前处理状态：未发现必须预置题面图的小题。")
@@ -567,7 +603,78 @@ def _visual_requirement_lines(result: dict[str, Any]) -> list[str]:
         )
         for item in uncertain:
             lines.append(_visual_item_row(item, "人工复核后决定是否补图"))
+    if isinstance(binding, dict):
+        non_default = binding.get("non_default_placements")
+        if isinstance(non_default, list) and non_default:
+            lines.extend(
+                [
+                    "",
+                    "#### 非默认图片排列审计",
+                    "",
+                    "| 题号 | 模式 | 重复数 | 间距 |",
+                    "| --- | --- | ---: | ---: |",
+                ]
+            )
+            for item in non_default:
+                if not isinstance(item, dict):
+                    continue
+                lines.append(
+                    f"| {_escape_cell(item.get('id', '未记录'))} | "
+                    f"{_escape_cell(item.get('mode', '未记录'))} | "
+                    f"{_display_value(item.get('repeat_count'))} | "
+                    f"{_format_mm(item.get('gap_mm'))} |"
+                )
+        overrides = binding.get("height_overrides")
+        if isinstance(overrides, list) and overrides:
+            lines.extend(
+                [
+                    "",
+                    "#### 框高覆盖审计",
+                    "",
+                    "| 题号 | 原框高 | 新框高 |",
+                    "| --- | ---: | ---: |",
+                ]
+            )
+            for item in overrides:
+                if not isinstance(item, dict):
+                    continue
+                lines.append(
+                    f"| {_escape_cell(item.get('id', '未记录'))} | "
+                    f"{_escape_cell(item.get('from', '未记录'))} | "
+                    f"{_escape_cell(item.get('to', '未记录'))} |"
+                )
     return lines
+
+
+def _binding_item_sets(result: dict[str, Any]) -> tuple[set[str], set[str], set[str]]:
+    binding = result.get("prompt_image_binding")
+    binding_data = binding if isinstance(binding, dict) else {}
+    approved = binding_data.get("approved_visual_item_ids")
+    embedded = binding_data.get("embedded_visual_item_ids", result.get("embedded_visual_item_ids"))
+    failed = binding_data.get("failed_visual_item_ids")
+    embedded_set = {str(item) for item in embedded} if isinstance(embedded, list) else set()
+    approved_set = {str(item) for item in approved} if isinstance(approved, list) else set()
+    return (
+        approved_set | embedded_set,
+        embedded_set,
+        {str(item) for item in failed} if isinstance(failed, list) else set(),
+    )
+
+
+def _binding_failed(report: dict[str, Any]) -> bool:
+    result = report.get("result")
+    if not isinstance(result, dict):
+        return False
+    binding = result.get("prompt_image_binding")
+    return isinstance(binding, dict) and binding.get("status") == "failed"
+
+
+def _binding_cancelled_ids(result: dict[str, Any]) -> set[str]:
+    binding = result.get("prompt_image_binding")
+    if not isinstance(binding, dict):
+        return set()
+    cancelled = binding.get("cancelled_visual_item_ids")
+    return {str(item) for item in cancelled} if isinstance(cancelled, list) else set()
 
 
 def _visual_item_row(item: object, handling: str) -> str:

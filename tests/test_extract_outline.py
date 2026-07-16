@@ -190,3 +190,29 @@ def test_parse_outline_omits_item_score_even_when_score_is_present() -> None:
     )
 
     assert outline["questions"][0]["items"] == [{"id": "1-2", "page": 1}]
+
+
+def test_parse_outline_keeps_only_leaf_ids_when_parent_group_ids_are_present() -> None:
+    outline = parse_outline(
+        [
+            TextPage(
+                page=1,
+                text="""
+第6题 层级题号测试（20分）
+6-3 分组标题
+6-3-1 第一分问
+6-3-2 子分组标题
+6-3-2-1 第一叶子分问
+6-3-2-2 第二叶子分问
+6-4 独立分问
+""",
+            )
+        ]
+    )
+
+    assert outline["questions"][0]["items"] == [
+        {"id": "6-3-1", "page": 1},
+        {"id": "6-3-2-1", "page": 1},
+        {"id": "6-3-2-2", "page": 1},
+        {"id": "6-4", "page": 1},
+    ]
