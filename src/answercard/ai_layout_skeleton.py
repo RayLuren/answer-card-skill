@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from answercard.item_id_hierarchy import first_parent_descendant_pair
+
 
 def write_ai_layout_skeleton(
     outline_path: str | Path,
@@ -44,6 +46,12 @@ def build_ai_layout_skeleton(outline: Any) -> dict[str, Any]:
         item_ids = [_required_id(item, f"{context}.items[{item_index}]") for item_index, item in enumerate(items)]
         if len(item_ids) != len(set(item_ids)):
             raise ValueError(f"{context}.items contains duplicate ids")
+        parent_pair = first_parent_descendant_pair(item_ids)
+        if parent_pair is not None:
+            parent_id, descendant_id = parent_pair
+            raise ValueError(
+                f"{context}.items contains parent id {parent_id} and descendant id {descendant_id}"
+            )
         if not item_ids:
             item_ids = [question_id]
 

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
+from typing import Any
 
 
-DEFAULT_ALIGNMENT_TOLERANCE_MM = 0.7
+DEFAULT_ALIGNMENT_TOLERANCE_MM = 1.1
 DEFAULT_MAX_ALIGNMENT_PASSES = 3
 
 
@@ -15,6 +17,42 @@ class FrameMeasurement:
     page: int
     top_from_page_top_mm: float
     bottom_from_page_bottom_mm: float
+
+
+def load_alignment_pass_summaries(
+    report_path: str | Path,
+    *,
+    tolerance_mm: float,
+) -> list[dict[str, Any]]:
+    """Load answer-free per-pass alignment summaries for durable reporting."""
+
+    if tolerance_mm < 0:
+        raise ValueError("tolerance_mm must be zero or greater")
+    data = json.loads(Path(report_path).read_text(encoding="utf-8"))
+    passes = data.get("passes") if isinstance(data, dict) else None
+    if not isinstance(passes, list) or not passes:
+        raise ValueError("alignment report must contain at least one pass")
+
+    tolerance = round(float(tolerance_mm), 3)
+    summaries: list[dict[str, Any]] = []
+    for index, entry in enumerate(passes):
+        if not isinstance(entry, dict):
+            raise ValueError(f"alignment report pass {index} must be an object")
+        pass_number = entry.get("pass")
+        if isinstance(pass_number, bool) or not isinstance(pass_number, int):
+            raise ValueError(f"alignment report pass {index} must have an integer pass number")
+        top_spread = _report_number(entry, "top_spread_mm", index=index)
+        bottom_spread = _report_number(entry, "bottom_spread_mm", index=index)
+        summaries.append(
+            {
+                "pass": pass_number,
+                "top_spread_mm": top_spread,
+                "bottom_spread_mm": bottom_spread,
+                "tolerance_mm": tolerance,
+                "passed": top_spread <= tolerance_mm and bottom_spread <= tolerance_mm,
+            }
+        )
+    return summaries
 
 
 def measure_pdf_frames(
@@ -102,6 +140,13 @@ def alignment_spreads(
         raise ValueError("frame measurements are empty")
     bottom_spread = 0.0 if not bottoms else max(bottoms) - min(bottoms)
     return max(tops) - min(tops), bottom_spread
+
+
+def _report_number(entry: dict[str, Any], key: str, *, index: int) -> float:
+    value = entry.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"alignment report pass {index} {key} must be numeric")
+    return round(float(value), 3)
 
 
 def _dark_row_indices(

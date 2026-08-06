@@ -20,6 +20,7 @@ from answercard.ai_layout_to_qspec import ai_layout_to_qspec
 from answercard.frame_alignment import (
     DEFAULT_ALIGNMENT_TOLERANCE_MM,
     DEFAULT_MAX_ALIGNMENT_PASSES,
+    load_alignment_pass_summaries,
 )
 from answercard.pipeline_timing import PipelineTimer
 from answercard.schema import load_spec
@@ -67,6 +68,7 @@ def run_full_pipeline(
     *,
     paper_title: str,
     omit_front_page: bool = False,
+    use_existing_outline: bool = False,
     outline_path: str | Path | None = None,
     ai_layout_path: str | Path | None = None,
     visual_requirements_path: str | Path | None = None,
@@ -111,13 +113,21 @@ def run_full_pipeline(
         }
     )
 
-    written_outline = _run_stage(
-        "extract_outline",
-        extract_outline,
-        pdf_path,
-        resolved_outline_path,
-        timer=timer,
-    )
+    if use_existing_outline:
+        written_outline = _run_stage(
+            "reuse_existing_outline",
+            _require_existing_outline,
+            resolved_outline_path,
+            timer=timer,
+        )
+    else:
+        written_outline = _run_stage(
+            "extract_outline",
+            extract_outline,
+            pdf_path,
+            resolved_outline_path,
+            timer=timer,
+        )
     outline_counts = _run_stage(
         "read_outline_summary", _read_outline_counts, written_outline, timer=timer
     )
@@ -161,15 +171,28 @@ def run_full_pipeline(
         omit_front_page=omit_front_page,
         timer=timer,
     )
-    pdf_output = _run_stage(
-        "build_answer_card",
-        build_answer_card,
-        written_qspec,
-        build_dir=resolved_build_dir,
-        align_pages=True,
-        alignment_tolerance_mm=alignment_tolerance_mm,
-        max_alignment_passes=max_alignment_passes,
-        timer=timer,
+    try:
+        pdf_output = _run_stage(
+            "build_answer_card",
+            build_answer_card,
+            written_qspec,
+            build_dir=resolved_build_dir,
+            align_pages=True,
+            alignment_tolerance_mm=alignment_tolerance_mm,
+            max_alignment_passes=max_alignment_passes,
+            timer=timer,
+        )
+    except PipelineError:
+        _record_alignment_history(
+            timer,
+            resolved_build_dir / "frame_alignment.json",
+            alignment_tolerance_mm,
+        )
+        raise
+    _record_alignment_history(
+        timer,
+        resolved_build_dir / "frame_alignment.json",
+        alignment_tolerance_mm,
     )
     preview_outputs = _run_stage(
         "render_pdf_pages",
@@ -218,6 +241,23 @@ def _run_stage(
         raise PipelineError(f"{stage} failed: {exc}") from exc
 
 
+def _record_alignment_history(
+    timer: PipelineTimer,
+    report_path: Path,
+    tolerance_mm: float,
+) -> None:
+    if not report_path.is_file():
+        return
+    try:
+        history = load_alignment_pass_summaries(
+            report_path,
+            tolerance_mm=tolerance_mm,
+        )
+    except (OSError, ValueError, json.JSONDecodeError):
+        return
+    timer.update_result({"alignment_history": history})
+
+
 def _read_outline_counts(outline_path: str | Path) -> tuple[int, int]:
     with Path(outline_path).open("r", encoding="utf-8") as outline_file:
         outline = json.load(outline_file)
@@ -248,6 +288,13 @@ def _require_ai_layout(ai_layout_path: str | Path) -> Path:
             f"Create build/ai_layout.json from AI inspection using {DEFAULT_AI_LAYOUT_PROMPT_PATH} "
             "before generating qspec."
         )
+    return path
+
+
+def _require_existing_outline(outline_path: str | Path) -> Path:
+    path = Path(outline_path)
+    if not path.is_file():
+        raise ValueError(f"frozen outline does not exist: {path}")
     return path
 
 
@@ -395,6 +442,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("pdf_path", type=Path)
     parser.add_argument("--paper-title", required=True)
     parser.add_argument("--omit-front-page", action="store_true")
+    parser.add_argument("--use-existing-outline", action="store_true")
     parser.add_argument("--outline-path", type=Path, default=None)
     parser.add_argument("--ai-layout-path", type=Path, default=None)
     parser.add_argument("--visual-requirements-path", type=Path, default=None)
@@ -420,6 +468,7 @@ def main(argv: list[str] | None = None) -> int:
             args.pdf_path,
             paper_title=args.paper_title,
             omit_front_page=args.omit_front_page,
+            use_existing_outline=args.use_existing_outline,
             outline_path=args.outline_path,
             ai_layout_path=args.ai_layout_path,
             visual_requirements_path=args.visual_requirements_path,

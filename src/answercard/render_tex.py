@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import os
 from pathlib import Path
-from typing import Final
+from typing import Any, Final, Mapping
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
@@ -56,7 +56,9 @@ def render_tex(
     template_dir: str | Path = DEFAULT_TEMPLATE_DIR,
     template_name: str = DEFAULT_TEMPLATE_NAME,
     page_height_adjustments_mm: list[float] | None = None,
+    block_height_adjustments_mm: Mapping[str, float] | None = None,
     page_top_spacers_mm: list[float] | None = None,
+    image_bindings: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> Path:
     """Render a qspec.yaml file to a LaTeX document and return the output path."""
 
@@ -68,8 +70,10 @@ def render_tex(
         template_dir=template_dir,
         template_name=template_name,
         page_height_adjustments_mm=page_height_adjustments_mm,
+        block_height_adjustments_mm=block_height_adjustments_mm,
         page_top_spacers_mm=page_top_spacers_mm,
         front_page_asset_path=asset_path,
+        image_bindings=image_bindings,
     )
 
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -95,14 +99,17 @@ def render_spec(
     template_dir: str | Path = DEFAULT_TEMPLATE_DIR,
     template_name: str = DEFAULT_TEMPLATE_NAME,
     page_height_adjustments_mm: list[float] | None = None,
+    block_height_adjustments_mm: Mapping[str, float] | None = None,
     page_top_spacers_mm: list[float] | None = None,
     front_page_asset_path: str = "../assets/periodic-table.png",
+    image_bindings: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> str:
     """Render an already validated spec object to LaTeX."""
 
     pages = plan_answer_pages(
         spec,
         page_height_adjustments_mm=page_height_adjustments_mm,
+        block_height_adjustments_mm=block_height_adjustments_mm,
         page_top_spacers_mm=page_top_spacers_mm,
     )
     environment = Environment(
@@ -129,6 +136,7 @@ def render_spec(
         pages=pages,
         score_table=build_score_table(spec),
         front_page_asset_path=front_page_asset_path,
+        image_bindings=dict(image_bindings or {}),
     )
 
 

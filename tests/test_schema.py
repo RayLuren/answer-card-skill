@@ -234,6 +234,17 @@ def test_validate_spec_rejects_question_id_when_question_has_multiple_blocks() -
         validate_spec(data)
 
 
+def test_validate_spec_rejects_parent_and_descendant_block_ids() -> None:
+    data = valid_spec_data()
+    data["questions"][0]["blocks"] = [
+        {"id": "1-2", "kind": "short_answer", "height": "20mm"},
+        {"id": "1-2-1", "kind": "short_answer", "height": "20mm"},
+    ]
+
+    with pytest.raises(ValueError, match="parent id 1-2 and descendant id 1-2-1"):
+        validate_spec(data)
+
+
 def test_validate_spec_requires_known_top_level_sections() -> None:
     data = valid_spec_data()
     del data["paper"]

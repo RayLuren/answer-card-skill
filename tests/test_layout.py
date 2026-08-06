@@ -104,16 +104,16 @@ def test_plan_answer_pages_moves_a_block_whole_to_the_next_page() -> None:
 
 
 def test_plan_answer_pages_shrinks_existing_blocks_when_whole_block_nearly_fits() -> None:
-    spec = _single_question_spec(["80mm", "80mm", "99.8mm"])
+    spec = _single_question_spec(["80mm", "80mm", "104.8mm"])
     events: list[PaginationEvent] = []
 
     pages = plan_answer_pages(spec, pagination_events=events)
 
     assert len(pages) == 1
     assert [block.height for block in pages[0].questions[0].blocks] == [
-        "79.5mm",
-        "79.5mm",
-        "99.8mm",
+        "79.7mm",
+        "79.7mm",
+        "104.8mm",
     ]
     assert len(events) == 1
     assert events[0].rule == "near-fit-shrink"
@@ -122,21 +122,77 @@ def test_plan_answer_pages_shrinks_existing_blocks_when_whole_block_nearly_fits(
 
 
 def test_plan_answer_pages_fills_tiny_remainder_and_moves_whole_block() -> None:
-    spec = _single_question_spec(["130mm", "128mm", "50mm"])
+    spec = _single_question_spec(["132mm", "130mm", "50mm"])
     events: list[PaginationEvent] = []
 
     pages = plan_answer_pages(spec, pagination_events=events)
 
     assert len(pages) == 2
     assert [block.height for block in pages[0].questions[0].blocks] == [
-        "131.4mm",
-        "129.4mm",
+        "133.2mm",
+        "131.2mm",
     ]
     assert [block.height for block in pages[1].questions[0].blocks] == ["50mm"]
     assert len(events) == 1
     assert events[0].rule == "tiny-fragment-fill"
     assert events[0].block_id == "1-3"
     assert events[0].available_height_mm < 3
+
+
+def test_plan_answer_pages_uses_configured_rule_width_instead_of_fixed_row_overhead() -> None:
+    spec = _single_question_spec(["130mm", "132mm"])
+
+    pages = plan_answer_pages(spec)
+
+    assert len(pages) == 1
+    assert [block.height for block in pages[0].questions[0].blocks] == ["130mm", "132mm"]
+
+
+def test_page_height_growth_is_repaginated_before_rendering() -> None:
+    spec = _single_question_spec(["130mm", "130mm", "4mm"])
+
+    pages = plan_answer_pages(spec, page_height_adjustments_mm=[3.0])
+
+    assert len(pages) == 2
+    assert [block.height for block in pages[0].questions[0].blocks] == ["131mm", "131mm"]
+    assert [block.height for block in pages[1].questions[0].blocks] == ["5mm"]
+
+
+def test_multiline_question_title_height_is_counted_before_pagination() -> None:
+    spec = AnswerCardSpec(
+        paper=PaperSpec(
+            title="Test",
+            page_size="A4",
+            omit_front_page=True,
+            total_score=20,
+            margin={"top": "12mm", "bottom": "12mm", "left": "10mm", "right": "10mm"},
+        ),
+        style=StyleSpec(label_width="13mm", border_width="0.6pt", box_gap="1.5mm", title_gap="2mm"),
+        questions=[
+            QuestionSpec(
+                id="1",
+                title="One",
+                score=10,
+                blocks=[BlockSpec(id="1-1", kind="calculation", height="230mm")],
+            ),
+            QuestionSpec(
+                id="2",
+                title="W" * 400,
+                score=10,
+                blocks=[BlockSpec(id="2-1", kind="short_answer", height="25mm")],
+            ),
+        ],
+    )
+
+    pages = plan_answer_pages(spec)
+
+    assert len(pages) == 2
+    assert [block.block.id for question in pages[0].questions for block in question.blocks] == [
+        "1-1"
+    ]
+    assert [block.block.id for question in pages[1].questions for block in question.blocks] == [
+        "2-1"
+    ]
 
 
 def test_plan_answer_pages_leaves_no_duplicate_ids_after_page_break() -> None:

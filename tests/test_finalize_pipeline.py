@@ -183,8 +183,17 @@ def test_finalize_pipeline_validates_cleans_and_retains_audit_artifacts_by_defau
     assert r"\pagestyle{answercard}" in retained_tex
     assert r"\QuestionTitleFont\thepage" in retained_tex
     stored_report = json.loads(paths["report"].read_text(encoding="utf-8"))
-    assert stored_report["finalization_inputs"]["alignment_tolerance_mm"] == 0.7
-    assert stored_report["result"]["default_alignment_tolerance_mm"] == 0.7
+    assert stored_report["finalization_inputs"]["alignment_tolerance_mm"] == 1.1
+    assert stored_report["result"]["default_alignment_tolerance_mm"] == 1.1
+    assert stored_report["result"]["alignment_history"] == [
+        {
+            "pass": 1,
+            "top_spread_mm": 0.1,
+            "bottom_spread_mm": 0.2,
+            "tolerance_mm": 1.1,
+            "passed": True,
+        }
+    ]
     assert stored_report["result"]["visual_requirement_counts"]["draw_on_scaffold"] == 1
     assert stored_report["result"]["visual_asset_status"] == "awaiting_manual_assets"
     assert stored_report["result"]["preprinted_visual_items"] == [

@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+from typing import Any, Mapping
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -16,7 +17,7 @@ from answercard.frame_alignment import (
     alignment_spreads,
     measure_pdf_frames,
 )
-from answercard.layout import plan_answer_pages
+from answercard.layout import PlannedPage, plan_answer_pages
 from answercard.schema import load_spec
 
 
@@ -39,6 +40,7 @@ def build_answer_card(
     align_pages: bool = False,
     max_alignment_passes: int = DEFAULT_MAX_ALIGNMENT_PASSES,
     alignment_tolerance_mm: float = DEFAULT_ALIGNMENT_TOLERANCE_MM,
+    image_bindings: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> Path:
     """Validate qspec, render LaTeX, compile it with xelatex, and return the PDF path."""
 
@@ -46,7 +48,7 @@ def build_answer_card(
     tex_path = destination_dir / DEFAULT_TEX_NAME
     pdf_path = destination_dir / DEFAULT_PDF_NAME
 
-    render_tex(spec_path, tex_path)
+    render_tex(spec_path, tex_path, image_bindings=image_bindings)
     _compile_tex(tex_path, pdf_path, destination_dir, xelatex=xelatex)
     if align_pages:
         _align_compiled_pages(
@@ -57,6 +59,7 @@ def build_answer_card(
             xelatex=xelatex,
             max_passes=max_alignment_passes,
             tolerance_mm=alignment_tolerance_mm,
+            image_bindings=image_bindings,
         )
     return pdf_path
 
@@ -70,18 +73,21 @@ def _align_compiled_pages(
     xelatex: str,
     max_passes: int,
     tolerance_mm: float,
+    image_bindings: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> None:
     spec = load_spec(spec_path)
-    expected_body_page_count = len(plan_answer_pages(spec))
+    current_plan = plan_answer_pages(spec)
+    expected_body_page_count = len(current_plan)
     front_page_count = 0 if spec.paper.omit_front_page else 1
-    expected_total_page_count = expected_body_page_count + front_page_count
-    page_height_adjustments = [0.0] * expected_body_page_count
+    block_height_adjustments: dict[str, float] = {}
     page_top_spacers = [0.0] * expected_body_page_count
     report: list[dict[str, object]] = []
     alignment_target_mm: float | None = None
+    _write_alignment_report(build_dir, report)
 
     for pass_number in range(max_passes + 1):
         measurements = measure_pdf_frames(pdf_path, skip_pages=front_page_count)
+        expected_total_page_count = expected_body_page_count + front_page_count
         if len(measurements) != expected_body_page_count:
             raise BuildError(
                 f"page alignment expected {expected_body_page_count} body pages and "
@@ -128,20 +134,58 @@ def _align_compiled_pages(
             target_mm=alignment_target_mm,
         )
         height_delta[-1] = 0.0
-        page_height_adjustments = [
-            current + delta for current, delta in zip(page_height_adjustments, height_delta, strict=True)
-        ]
-        page_top_spacers = [
-            max(0.0, current + delta)
-            for current, delta in zip(page_top_spacers, top_delta, strict=True)
-        ]
+        for planned_page, delta in zip(current_plan, height_delta, strict=True):
+            page_blocks = [
+                planned_block
+                for planned_question in planned_page.questions
+                for planned_block in planned_question.blocks
+            ]
+            if not page_blocks or abs(delta) <= 0.001:
+                continue
+            delta_per_block = delta / len(page_blocks)
+            for planned_block in page_blocks:
+                block_id = planned_block.block.id
+                block_height_adjustments[block_id] = (
+                    block_height_adjustments.get(block_id, 0.0) + delta_per_block
+                )
+
+        next_plan = plan_answer_pages(
+            spec,
+            block_height_adjustments_mm=block_height_adjustments,
+        )
+        if _page_signatures(next_plan) == _page_signatures(current_plan):
+            page_top_spacers = [
+                max(0.0, current + delta)
+                for current, delta in zip(page_top_spacers, top_delta, strict=True)
+            ]
+        else:
+            # A real repagination invalidates page-indexed top spacers.  Keep
+            # the per-block height corrections, reset the page-local spacers,
+            # and measure the new layout afresh on the next bounded pass.
+            page_top_spacers = [0.0] * len(next_plan)
+            alignment_target_mm = None
+
+        current_plan = next_plan
+        expected_body_page_count = len(current_plan)
         render_tex(
             spec_path,
             tex_path,
-            page_height_adjustments_mm=page_height_adjustments,
+            block_height_adjustments_mm=block_height_adjustments,
             page_top_spacers_mm=page_top_spacers,
+            image_bindings=image_bindings,
         )
         _compile_tex(tex_path, pdf_path, build_dir, xelatex=xelatex)
+
+
+def _page_signatures(pages: list[PlannedPage]) -> tuple[tuple[str, ...], ...]:
+    return tuple(
+        tuple(
+            planned_block.block.id
+            for planned_question in page.questions
+            for planned_block in planned_question.blocks
+        )
+        for page in pages
+    )
 
 
 def _write_alignment_report(build_dir: Path, report: list[dict[str, object]]) -> Path:

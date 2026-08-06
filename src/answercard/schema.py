@@ -11,6 +11,7 @@ from typing import Any
 import yaml
 
 from answercard.ai_layout_schema import RESOLVED_KINDS
+from answercard.item_id_hierarchy import first_parent_descendant_pair
 
 
 CURRENT_SCHEMA_VERSION = 1
@@ -189,6 +190,13 @@ def _validate_question(data: Any, index: int) -> QuestionSpec:
     if len(blocks) > 1 and any(block.id == question_id for block in blocks):
         raise ValueError(
             f"{context}.blocks may use question id {question_id} only when the question has one block"
+        )
+
+    parent_pair = first_parent_descendant_pair(block.id for block in blocks)
+    if parent_pair is not None:
+        parent_id, descendant_id = parent_pair
+        raise ValueError(
+            f"{context}.blocks contains parent id {parent_id} and descendant id {descendant_id}"
         )
 
     return QuestionSpec(

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
+import math
 import re
+import unicodedata
 
 from answercard.schema import AnswerCardSpec, BlockSpec, QuestionSpec
 
@@ -12,6 +15,9 @@ _DIMENSION_RE = re.compile(r"^(?P<value>(?:0|[1-9]\d*)(?:\.\d+)?)(?P<unit>mm|pt)
 _PAGE_HEIGHT_MM = {
     "A4": 297.0,
 }
+_PAGE_WIDTH_MM = {
+    "A4": 210.0,
+}
 _QUESTION_TITLE_MM = 12.0
 _QUESTION_NEEDSPACE_EXTRA_MM = 12.0
 _QUESTION_NEEDSPACE_MIN_MM = 35.0
@@ -19,8 +25,13 @@ _QUESTION_NEEDSPACE_MAX_MM = 95.0
 _PAGE_FILL_SLACK_MM = 1.5
 _FRAME_TOP_FROM_PAGE_TOP_MM = 15.36
 _FRAME_BOTTOM_FROM_PAGE_BOTTOM_MM = 15.36
-_IN_PAGE_QUESTION_TITLE_MM = 8.0
-_ANSWER_ROW_OVERHEAD_MM = 2.0
+# The rendered distance from one table's closing horizontal rule to the next
+# table's opening rule is 4.8mm for the one-line QuestionTitle macro.  Keep
+# this synchronized with the 10.5pt/12.5pt title font and 0.5mm table gap in
+# tex/main.tex.j2.
+_QUESTION_TITLE_BLOCK_MM = 4.8
+_QUESTION_TITLE_FONT_PT = 10.5
+_QUESTION_TITLE_BASELINE_PT = 12.5
 _NEAR_FIT_OVERFLOW_MM = 2.0
 _TINY_AVAILABLE_HEIGHT_MM = 3.0
 _THRESHOLD_RATIO = 0.30
@@ -79,10 +90,17 @@ def plan_answer_pages(
     spec: AnswerCardSpec,
     *,
     page_height_adjustments_mm: list[float] | None = None,
+    block_height_adjustments_mm: Mapping[str, float] | None = None,
     page_top_spacers_mm: list[float] | None = None,
     pagination_events: list[PaginationEvent] | None = None,
 ) -> list[PlannedPage]:
-    """Plan whole-block pages using the threshold-percentage fit rules."""
+    """Plan whole-block pages from rendered costs, then apply the 30% rules.
+
+    A block's rendered cost is its requested answer height plus the configured
+    horizontal rule width.  A major-question title between tables contributes
+    the measured title-macro height.  Alignment growth is applied to block
+    heights before the final pagination pass so it cannot bypass these costs.
+    """
 
     page_height = _PAGE_HEIGHT_MM.get(spec.paper.page_size.upper())
     if page_height is None:
@@ -96,6 +114,73 @@ def plan_answer_pages(
     )
     if frame_height <= 0:
         return [_single_unplanned_page(spec)]
+
+    border_width_mm = _dimension_to_mm(spec.style.border_width)
+    if border_width_mm <= 0:
+        raise ValueError("style border_width must be a positive dimension")
+
+    requested_adjustments = {
+        str(block_id): float(delta)
+        for block_id, delta in (block_height_adjustments_mm or {}).items()
+    }
+    title_costs_mm = {
+        question.id: _question_title_cost_mm(spec, question)
+        for question in spec.questions
+    }
+    pages = _paginate_items(
+        spec,
+        frame_height=frame_height,
+        border_width_mm=border_width_mm,
+        title_costs_mm=title_costs_mm,
+        block_height_adjustments_mm=requested_adjustments,
+        pagination_events=None if page_height_adjustments_mm else pagination_events,
+    )
+
+    # Backwards-compatible page adjustment input.  Convert each page delta to
+    # per-block growth, then paginate again.  This is deliberately a second
+    # pagination pass: alignment changes must be visible to the title/rule cost
+    # model and the 30% rules before TeX is rendered.
+    if page_height_adjustments_mm:
+        adjusted_heights = {
+            item.block.id: item.height_mm
+            for page_items in pages
+            for item in page_items
+        }
+        for page_number, page_items in enumerate(pages, start=1):
+            page_adjustment = _page_value(page_height_adjustments_mm, page_number)
+            if not page_items or abs(page_adjustment) <= 0.001:
+                continue
+            adjustment_per_block = page_adjustment / len(page_items)
+            for item in page_items:
+                adjusted_heights[item.block.id] += adjustment_per_block
+
+        requested_adjustments = {
+            block.id: max(1.0, adjusted_heights[block.id]) - _dimension_to_mm(block.height)
+            for question in spec.questions
+            for block in question.blocks
+        }
+        pages = _paginate_items(
+            spec,
+            frame_height=frame_height,
+            border_width_mm=border_width_mm,
+            title_costs_mm=title_costs_mm,
+            block_height_adjustments_mm=requested_adjustments,
+            pagination_events=pagination_events,
+        )
+
+    return _build_planned_pages(pages, page_top_spacers_mm=page_top_spacers_mm)
+
+
+def _paginate_items(
+    spec: AnswerCardSpec,
+    *,
+    frame_height: float,
+    border_width_mm: float,
+    title_costs_mm: Mapping[str, float],
+    block_height_adjustments_mm: Mapping[str, float],
+    pagination_events: list[PaginationEvent] | None,
+) -> list[list[_PageItem]]:
+    """Return page items after exact fixed-overhead accounting and 30% rules."""
 
     pages: list[list[_PageItem]] = []
     current_page: list[_PageItem] = []
@@ -124,19 +209,32 @@ def plan_answer_pages(
             if block.force_page_break_before and current_page:
                 finish_page()
 
-            block_height = _dimension_to_mm(block.height)
-            if block_height + _ANSWER_ROW_OVERHEAD_MM > frame_height:
+            block_height = max(
+                1.0,
+                _dimension_to_mm(block.height)
+                + float(block_height_adjustments_mm.get(block.id, 0.0)),
+            )
+            if block_height + border_width_mm > frame_height:
                 raise ValueError(
                     f"block {block.id} height {block.height} exceeds one-page frame capacity"
                 )
 
             show_title = block_index == 0
-            title_cost = _IN_PAGE_QUESTION_TITLE_MM if show_title and current_page else 0.0
+            # The first page frame begins below its heading.  A later question
+            # heading sits between two tables and therefore consumes frame
+            # height.  Continuation pages reserve the same top slot during the
+            # alignment pass.
+            full_title_cost = title_costs_mm[question.id] if show_title else 0.0
+            title_cost = (
+                full_title_cost
+                if show_title and current_page
+                else max(0.0, full_title_cost - _QUESTION_TITLE_BLOCK_MM)
+            )
             available_height = (
                 frame_height
                 - current_page_cost
                 - title_cost
-                - _ANSWER_ROW_OVERHEAD_MM
+                - border_width_mm
             )
 
             if block_height > available_height and current_page:
@@ -168,7 +266,7 @@ def plan_answer_pages(
                         )
                     resize_current_page(total_adjustment)
                     finish_page()
-                    title_cost = 0.0
+                    title_cost = max(0.0, full_title_cost - _QUESTION_TITLE_BLOCK_MM)
                 elif (
                     overflow_height < _NEAR_FIT_OVERFLOW_MM
                     and overflow_ratio < _THRESHOLD_RATIO
@@ -192,7 +290,7 @@ def plan_answer_pages(
                     resize_current_page(-overflow_height)
                 else:
                     finish_page()
-                    title_cost = 0.0
+                    title_cost = max(0.0, full_title_cost - _QUESTION_TITLE_BLOCK_MM)
 
             current_page.append(
                 _PageItem(
@@ -202,19 +300,24 @@ def plan_answer_pages(
                     height_mm=block_height,
                 )
             )
-            current_page_cost += title_cost + block_height + _ANSWER_ROW_OVERHEAD_MM
+            current_page_cost += title_cost + block_height + border_width_mm
 
     if current_page:
         pages.append(current_page)
+    return pages
 
+
+def _build_planned_pages(
+    pages: list[list[_PageItem]],
+    *,
+    page_top_spacers_mm: list[float] | None,
+) -> list[PlannedPage]:
     planned_pages: list[PlannedPage] = []
     for page_number, page_items in enumerate(pages, start=1):
-        page_height_adjustment = _page_value(page_height_adjustments_mm, page_number)
-        adjustment_per_block = page_height_adjustment / len(page_items) if page_items else 0.0
         planned_page = _build_planned_page(
             page_number,
             page_items,
-            adjustment_per_block=adjustment_per_block,
+            adjustment_per_block=0.0,
         )
         planned_pages.append(
             replace(
@@ -292,6 +395,40 @@ def _page_value(values: list[float] | None, page_number: int) -> float:
     if values is None or page_number > len(values):
         return 0.0
     return float(values[page_number - 1])
+
+
+def _question_title_cost_mm(spec: AnswerCardSpec, question: QuestionSpec) -> float:
+    """Estimate the rendered title height with the template's font and width."""
+
+    page_width = _PAGE_WIDTH_MM.get(spec.paper.page_size.upper())
+    if page_width is None:
+        return _QUESTION_TITLE_BLOCK_MM
+    available_width = (
+        page_width
+        - _dimension_to_mm(spec.paper.margin["left"])
+        - _dimension_to_mm(spec.paper.margin["right"])
+    )
+    if available_width <= 0:
+        return _QUESTION_TITLE_BLOCK_MM
+
+    title = question.title.strip()
+    if title == f"第{question.id}题":
+        title = ""
+    percent = "" if question.percent is None else f"，占 {question.percent}%"
+    rendered = f"第 {question.id} 题 {title}（{question.score:g} 分{percent}）"
+    width_units = sum(_title_character_width_units(character) for character in rendered)
+    font_mm = _QUESTION_TITLE_FONT_PT * 25.4 / 72.27
+    line_count = max(1, math.ceil(width_units * font_mm / available_width))
+    extra_line_mm = _QUESTION_TITLE_BASELINE_PT * 25.4 / 72.27
+    return _QUESTION_TITLE_BLOCK_MM + (line_count - 1) * extra_line_mm
+
+
+def _title_character_width_units(character: str) -> float:
+    if character.isspace():
+        return 0.5
+    if unicodedata.east_asian_width(character) in {"W", "F"}:
+        return 1.0
+    return 0.55
 
 
 def _question_needspace_mm(question: QuestionSpec) -> float:
