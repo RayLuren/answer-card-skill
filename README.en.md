@@ -21,7 +21,7 @@ A blank answer-card generator for structured examinations such as chemistry comp
 
 ## Project status
 
-The current version is `v0.2.0`. On 2026-07-15, one real-paper end-to-end trial passed the hierarchical-id fix, 12-page PDF build, previews, `1.1 mm` frame alignment, and final validation. Frame alignment remains measured at `200 DPI`. The repository is an operational engineering version with a usable Codex-hosted directory workflow, deterministic clean-image preparation, and audited post-approval image binding. See the [changelog](CHANGELOG.md) for versioned changes.
+The current version is `v0.3.0`. On 2026-08-06, three scanned PDFs known to lack extractable text completed the automatic OCR fallback and produced schema-valid structured JSON, while a PDF with an existing text layer stayed on the normal extraction path. An earlier real-paper end-to-end trial also passed the hierarchical-id fix, 12-page PDF build, previews, `1.1 mm` frame alignment, and final validation. Frame alignment remains measured at `200 DPI`. The repository is an operational engineering version with a usable Codex-hosted directory workflow, deterministic clean-image preparation, and audited post-approval image binding. See the [changelog](CHANGELOG.md) for versioned changes.
 
 Auditable post-approval image binding is implemented. The main remaining work is to rerun the 19-paper validation set under the new `1.1 mm` frame-alignment default, harden interrupted-run recovery, broaden platform/model coverage, and finalize Skill packaging after the production contract stabilizes.
 
