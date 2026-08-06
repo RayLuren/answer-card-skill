@@ -11,7 +11,7 @@ A blank answer-card generator for structured examinations such as chemistry comp
 
 - Process a directory of arbitrarily named first-level PDFs into blank answer cards.
 - Keep an auditable intermediate layer through `outline.json`, `ai_layout.json`, and qspec.
-- Automatically OCR pages without a text layer in memory, persisting only the answer-free `outline.json`.
+- Probe all pages quickly with PyMuPDF, use `pypdf` only for text-bearing pages, and OCR only blank pages in memory while persisting only the answer-free `outline.json`.
 - Generate blocks only for leaf item ids in a hierarchy, with schema guards against parent/descendant collisions.
 - Use a visual-capable AI component to judge block layout, height, and prompt-side visual requirements.
 - Render the first page, answer body, and page numbers deterministically with Jinja2 and XeLaTeX.

@@ -11,7 +11,7 @@
 
 - 从任意命名的第一层 PDF 目录生成一批空白答题卡。
 - 使用 `outline.json`、`ai_layout.json` 和 qspec 形成可审计的中间层。
-- 对没有文字层的页面自动执行仅驻留内存的 RapidOCR 回退，只把无答案结构写入 `outline.json`。
+- 先用 PyMuPDF 快速探测全部页面；有文字页才交给 `pypdf`，空文字层页面才执行仅驻留内存的 RapidOCR 回退，只把无答案结构写入 `outline.json`。
 - 层级题号只为实际叶子分问生成答题块，并在后续 schema 中拒绝父子 ID 共存。
 - 由具备视觉能力的 AI 判断答题块类型、高度和题目配图需求。
 - 使用 Jinja2 和 XeLaTeX 确定性生成首页、答题区和页码。

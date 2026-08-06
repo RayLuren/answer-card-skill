@@ -292,16 +292,28 @@ def test_parse_outline_keeps_only_leaf_ids_when_parent_group_ids_are_present() -
 
 
 def test_extract_pdf_text_uses_transient_ocr_only_for_blank_pages(monkeypatch) -> None:
+    from answercard.ocr_text import PdfTextLayerProbe
+
+    extracted_pages: list[int] = []
+
     class FakePage:
-        def __init__(self, text: str) -> None:
+        def __init__(self, page_number: int, text: str) -> None:
+            self.page_number = page_number
             self.text = text
 
         def extract_text(self) -> str:
+            extracted_pages.append(self.page_number)
             return self.text
 
     monkeypatch.setattr(
+        "answercard.ocr_text.probe_pdf_text_layers",
+        lambda _path: PdfTextLayerProbe(page_count=2, text_pages=frozenset({1})),
+    )
+    monkeypatch.setattr(
         "pypdf.PdfReader",
-        lambda _path: SimpleNamespace(pages=[FakePage("native structure"), FakePage("")]),
+        lambda _path: SimpleNamespace(
+            pages=[FakePage(1, "native structure"), FakePage(2, "must not be extracted")]
+        ),
     )
     calls: list[tuple[list[int], int]] = []
 
@@ -318,6 +330,82 @@ def test_extract_pdf_text_uses_transient_ocr_only_for_blank_pages(monkeypatch) -
         TextPage(page=2, text="第2题（8分）\n2-1", from_ocr=True),
     ]
     assert calls == [([2], 240)]
+    assert extracted_pages == [1]
+
+
+def test_extract_pdf_text_skips_pypdf_for_image_only_pdf(monkeypatch) -> None:
+    from answercard.ocr_text import PdfTextLayerProbe
+
+    monkeypatch.setattr(
+        "answercard.ocr_text.probe_pdf_text_layers",
+        lambda _path: PdfTextLayerProbe(page_count=2, text_pages=frozenset()),
+    )
+    monkeypatch.setattr(
+        "pypdf.PdfReader",
+        lambda _path: (_ for _ in ()).throw(AssertionError("pypdf must not open image-only PDF")),
+    )
+    monkeypatch.setattr(
+        "answercard.ocr_text.extract_ocr_page_texts",
+        lambda _path, page_numbers, *, dpi: {
+            page_number: f"第{page_number}题"
+            for page_number in page_numbers
+        },
+    )
+
+    pages = extract_pdf_text("sample.pdf")
+
+    assert pages == [
+        TextPage(page=1, text="第1题", from_ocr=True),
+        TextPage(page=2, text="第2题", from_ocr=True),
+    ]
+
+
+def test_extract_pdf_text_skips_ocr_for_all_text_pdf(monkeypatch) -> None:
+    from answercard.ocr_text import PdfTextLayerProbe
+
+    class FakePage:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+        def extract_text(self) -> str:
+            return self.text
+
+    monkeypatch.setattr(
+        "answercard.ocr_text.probe_pdf_text_layers",
+        lambda _path: PdfTextLayerProbe(page_count=2, text_pages=frozenset({1, 2})),
+    )
+    monkeypatch.setattr(
+        "pypdf.PdfReader",
+        lambda _path: SimpleNamespace(pages=[FakePage("page one"), FakePage("page two")]),
+    )
+    monkeypatch.setattr(
+        "answercard.ocr_text.extract_ocr_page_texts",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("OCR must not run")),
+    )
+
+    pages = extract_pdf_text("sample.pdf")
+
+    assert pages == [TextPage(page=1, text="page one"), TextPage(page=2, text="page two")]
+
+
+def test_extract_pdf_text_ocr_fallback_handles_pypdf_false_positive(monkeypatch) -> None:
+    from answercard.ocr_text import PdfTextLayerProbe
+
+    class FakePage:
+        def extract_text(self) -> str:
+            return ""
+
+    monkeypatch.setattr(
+        "answercard.ocr_text.probe_pdf_text_layers",
+        lambda _path: PdfTextLayerProbe(page_count=1, text_pages=frozenset({1})),
+    )
+    monkeypatch.setattr("pypdf.PdfReader", lambda _path: SimpleNamespace(pages=[FakePage()]))
+    monkeypatch.setattr(
+        "answercard.ocr_text.extract_ocr_page_texts",
+        lambda _path, page_numbers, *, dpi: {1: "第1题"} if list(page_numbers) == [1] else {},
+    )
+
+    assert extract_pdf_text("sample.pdf") == [TextPage(page=1, text="第1题", from_ocr=True)]
 
 
 def test_extract_pdf_text_can_disable_ocr_fallback(monkeypatch) -> None:
@@ -326,6 +414,10 @@ def test_extract_pdf_text_can_disable_ocr_fallback(monkeypatch) -> None:
             return ""
 
     monkeypatch.setattr("pypdf.PdfReader", lambda _path: SimpleNamespace(pages=[FakePage()]))
+    monkeypatch.setattr(
+        "answercard.ocr_text.probe_pdf_text_layers",
+        lambda _path: (_ for _ in ()).throw(AssertionError("probe must not run")),
+    )
 
     pages = extract_pdf_text("sample.pdf", ocr_fallback=False)
 

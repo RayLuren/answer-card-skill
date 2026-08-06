@@ -18,6 +18,16 @@ MAX_OCR_DPI = 600
 
 
 @dataclass(frozen=True)
+class PdfTextLayerProbe:
+    page_count: int
+    text_pages: frozenset[int]
+
+    @property
+    def blank_pages(self) -> frozenset[int]:
+        return frozenset(range(1, self.page_count + 1)) - self.text_pages
+
+
+@dataclass(frozen=True)
 class _OcrSpan:
     text: str
     left: float
@@ -32,6 +42,25 @@ class _OcrSpan:
     @property
     def height(self) -> float:
         return max(1.0, self.bottom - self.top)
+
+
+def probe_pdf_text_layers(pdf_path: str | Path) -> PdfTextLayerProbe:
+    """Identify pages with extractable text without persisting page content."""
+
+    try:
+        import fitz
+    except ImportError as exc:
+        raise RuntimeError(
+            "PyMuPDF is required for PDF text-layer probing. Install project dependencies first."
+        ) from exc
+
+    text_pages: set[int] = set()
+    with fitz.open(pdf_path) as document:
+        page_count = len(document)
+        for page_number, page in enumerate(document, start=1):
+            if page.get_text("text").strip():
+                text_pages.add(page_number)
+    return PdfTextLayerProbe(page_count=page_count, text_pages=frozenset(text_pages))
 
 
 def extract_ocr_page_texts(

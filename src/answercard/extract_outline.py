@@ -103,31 +103,63 @@ def extract_pdf_text(
 ) -> list[TextPage]:
     """Return page text, using transient OCR only for pages with no text layer."""
 
+    if not ocr_fallback:
+        return _extract_native_pdf_text(pdf_path)
+
+    from answercard.ocr_text import extract_ocr_page_texts, probe_pdf_text_layers
+
+    probe = probe_pdf_text_layers(pdf_path)
+    native_texts: dict[int, str] = {}
+    if probe.text_pages:
+        try:
+            from pypdf import PdfReader
+        except ImportError as exc:
+            raise RuntimeError(
+                "pypdf is required to extract PDF text. Install project dependencies first."
+            ) from exc
+
+        reader = PdfReader(str(pdf_path))
+        if len(reader.pages) != probe.page_count:
+            raise ValueError("PDF page count changed during text extraction")
+        for page_number in sorted(probe.text_pages):
+            native_texts[page_number] = reader.pages[page_number - 1].extract_text() or ""
+
+    ocr_page_numbers = sorted(
+        probe.blank_pages
+        | {
+            page_number
+            for page_number, text in native_texts.items()
+            if not text.strip()
+        }
+    )
+    ocr_texts = (
+        extract_ocr_page_texts(pdf_path, ocr_page_numbers, dpi=ocr_dpi)
+        if ocr_page_numbers
+        else {}
+    )
+    return [
+        TextPage(
+            page=page_number,
+            text=ocr_texts.get(page_number, ""),
+            from_ocr=True,
+        )
+        if page_number in ocr_texts
+        else TextPage(page=page_number, text=native_texts.get(page_number, ""))
+        for page_number in range(1, probe.page_count + 1)
+    ]
+
+
+def _extract_native_pdf_text(pdf_path: str | Path) -> list[TextPage]:
     try:
         from pypdf import PdfReader
     except ImportError as exc:
         raise RuntimeError("pypdf is required to extract PDF text. Install project dependencies first.") from exc
 
     reader = PdfReader(str(pdf_path))
-    pages: list[TextPage] = []
-    for index, page in enumerate(reader.pages, start=1):
-        pages.append(TextPage(page=index, text=page.extract_text() or ""))
-    blank_page_numbers = [page.page for page in pages if not page.text.strip()]
-    if ocr_fallback and blank_page_numbers:
-        from answercard.ocr_text import extract_ocr_page_texts
-
-        ocr_texts = extract_ocr_page_texts(pdf_path, blank_page_numbers, dpi=ocr_dpi)
-        pages = [
-            TextPage(
-                page=page.page,
-                text=ocr_texts.get(page.page, ""),
-                from_ocr=page.page in ocr_texts,
-            )
-            if page.page in blank_page_numbers
-            else page
-            for page in pages
-        ]
-    return pages
+    return [
+        TextPage(page=index, text=page.extract_text() or "")
+        for index, page in enumerate(reader.pages, start=1)
+    ]
 
 
 def _numeric_id_key(value: str) -> tuple[int, ...]:

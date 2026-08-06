@@ -94,7 +94,7 @@ build/
 
 ### 无文字层 PDF 无法提取结构
 
-默认提取器会以 `220 DPI` 在内存中渲染空白文字层页面并调用 RapidOCR。它不会写出 OCR 全文或 OCR 页面图片，只会把题号、总分和来源页等允许字段写入 `outline.json`。如果依赖缺失，请重新执行：
+默认提取器先用 PyMuPDF 快速探测全部页面，只让 `pypdf` 处理有文字层的页面；空白文字层页面才会以 `220 DPI` 在内存中渲染并调用 RapidOCR。探测文字、OCR 全文和 OCR 页面图片都不会写盘，只会把题号、总分和来源页等允许字段写入 `outline.json`。如果依赖缺失，请重新执行：
 
 ```powershell
 .\.venv\Scripts\python -m pip install -e .
