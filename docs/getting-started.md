@@ -9,8 +9,7 @@
 - Python 3.11+
 - Git
 - XeLaTeX，且 `xelatex` 可以从命令行直接调用
-- Python 包：`jinja2`、`pypdf`、`pyyaml`、`pytest`
-- PyMuPDF，用于将 PDF 渲染为逐页 PNG
+- Python 包以 `pyproject.toml` 为准，其中 PyMuPDF 用于页面渲染，`rapidocr-onnxruntime` 用于无文字层页面的临时 OCR
 - 生产 AI 布局阶段还需要能够直接查看页面图片的视觉模型或可信视觉工具
 
 项目的确定性阶段可以在没有 AI 的情况下运行，但文本模型不得替代视觉判断或声称视觉判断已经完成。
@@ -25,7 +24,6 @@ cd answer-card-skill
 python -m venv .venv
 .\.venv\Scripts\python -m pip install --upgrade pip
 .\.venv\Scripts\python -m pip install -e .
-.\.venv\Scripts\python -m pip install pymupdf
 ```
 
 Linux 或 macOS 可将虚拟环境解释器替换为 `.venv/bin/python`。当前文档和前向测试主要覆盖 Windows；其他平台仍需进一步验证。
@@ -92,6 +90,14 @@ build/
 
 ```powershell
 .\.venv\Scripts\python -m pip install pymupdf
+```
+
+### 无文字层 PDF 无法提取结构
+
+默认提取器会以 `220 DPI` 在内存中渲染空白文字层页面并调用 RapidOCR。它不会写出 OCR 全文或 OCR 页面图片，只会把题号、总分和来源页等允许字段写入 `outline.json`。如果依赖缺失，请重新执行：
+
+```powershell
+.\.venv\Scripts\python -m pip install -e .
 ```
 
 ### 项目与系统临时目录不在同一盘符

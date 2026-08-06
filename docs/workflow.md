@@ -10,7 +10,7 @@
 
 ## 阶段 1：提取无答案结构
 
-参考 PDF 只用于提取题号、章节、主问题分值和来源页，输出 `build/outline.json`。随后生成 `build/ai_layout.skeleton.json`，锁定 question id、item id、顺序和分值，视觉槽位保持空白。
+参考 PDF 只用于提取题号、章节、主问题分值和来源页，输出 `build/outline.json`。没有文字层的页面会以 `220 DPI` 在内存中渲染并调用 RapidOCR；OCR 文字和 OCR 页面图像均不写盘，只把通过结构解析的允许字段写入 outline。大题简述以题号附近的原始标题为准：简述在分值前或分值后均可，只有视觉上存在独立简述时才原样保留；若题号附近只有题号、分值并直接进入题干，则使用 `第N题` 占位，渲染时不显示任何简述。不得从题干或答案概括、改写或补造简述。随后生成 `build/ai_layout.skeleton.json`，锁定 question id、item id、顺序和分值，视觉槽位保持空白。
 
 如果源页面看起来存在 outline 未记录的印刷小题号，必须先修正 outline；不能在 AI layout 中发明 id。
 
@@ -37,7 +37,7 @@ outline 和 AI layout 合并为 `spec/qspec.draft.yaml`，再通过 `src/answerc
 
 ## 阶段 5：整块分页
 
-`src/answercard/layout.py` 以完整 block 为最小单位规划分页。接近页尾时，阈值百分比规则可以适度缩小当前 block，或在下一 block 会留下极小无用碎片时扩展当前 block；不会跨页拆分一个 block。
+`src/answercard/layout.py` 以完整 block 为最小单位规划分页。它先按 LaTeX 模板计算页面实际占用：每个答题块使用 qspec 框高并加上 `style.border_width` 对应的横线厚度；同页出现新大题时计入题号标题的实际行高，标题过长时按可用版心宽度计入额外行高。完成这些固定开销计算后才执行 30% 阈值规则。接近页尾时，该规则可以适度缩小当前 block，或在下一 block 会留下极小无用碎片时扩展当前 block；不会跨页拆分一个 block。
 
 ## 阶段 6：渲染和首次编译
 
@@ -47,7 +47,7 @@ outline 和 AI layout 合并为 `spec/qspec.draft.yaml`，再通过 `src/answerc
 
 ## 阶段 7：页框对齐反馈环
 
-启用对齐时，`src/answercard/frame_alignment.py` 以 `200 DPI` 扫描页面水平框线。初始 PDF 记为 `pass 0`；非末页上、下边缘差异超过默认 `1.1mm` 时调整页面间距并重新编译，默认最多进行三次修正。
+启用对齐时，`src/answercard/frame_alignment.py` 以 `200 DPI` 扫描页面水平框线。初始 PDF 记为 `pass 0`；非末页上、下边缘差异超过默认 `1.1mm` 时，将高度修正落实到该页的具体答题块，再按题号和框线开销重新执行整块分页与 30% 规则后编译。若分页成员发生变化，旧的页序号顶部补偿立即作废，新页面重新测量；默认最多进行三次修正。
 
 无论成功还是失败，`build/frame_alignment.json` 和流水线报告都保留无答案的逐 pass 测量历史。
 

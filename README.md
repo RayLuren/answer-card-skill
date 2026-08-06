@@ -11,6 +11,7 @@
 
 - 从任意命名的第一层 PDF 目录生成一批空白答题卡。
 - 使用 `outline.json`、`ai_layout.json` 和 qspec 形成可审计的中间层。
+- 对没有文字层的页面自动执行仅驻留内存的 RapidOCR 回退，只把无答案结构写入 `outline.json`。
 - 层级题号只为实际叶子分问生成答题块，并在后续 schema 中拒绝父子 ID 共存。
 - 由具备视觉能力的 AI 判断答题块类型、高度和题目配图需求。
 - 使用 Jinja2 和 XeLaTeX 确定性生成首页、答题区和页码。
@@ -36,8 +37,7 @@
 
 - Python 3.11 或更高版本
 - XeLaTeX，可通过系统 `PATH` 调用
-- 项目 Python 依赖：`jinja2`、`pillow`、`pypdf`、`pyyaml`、`pytest`
-- PDF 页面预览：PyMuPDF
+- 项目 Python 依赖：以 `pyproject.toml` 为准，包含 PyMuPDF 和 `rapidocr-onnxruntime`
 - AI 布局阶段：能够直接检查渲染后 PDF 页面的视觉模型或可信视觉工具
 
 Windows PowerShell 示例：
@@ -47,7 +47,6 @@ git clone https://github.com/RayLuren/answer-card-skill.git
 cd answer-card-skill
 python -m venv .venv
 .\.venv\Scripts\python -m pip install -e .
-.\.venv\Scripts\python -m pip install pymupdf
 ```
 
 ### 通过 Codex 处理一个 PDF 目录
@@ -87,7 +86,7 @@ flowchart TD
     E -- 是 --> G[校验并提升 ai_layout]
     G --> H[导出 visual_requirements]
     H --> I[生成并校验 qspec]
-    I --> J[整块分页并渲染 LaTeX]
+    I --> J[计入题号与框线后按30%规则整块分页并渲染 LaTeX]
     J --> K[编译含首页的初始 PDF]
     K --> L{页框在 1.1mm 默认标准内?}
     L -- 否且未超过次数 --> J

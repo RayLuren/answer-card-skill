@@ -21,13 +21,17 @@ Accept a request such as:
 
 - Never persist, repeat, summarize, paraphrase, render, or test against reference-answer content.
 - Keep source-page PNG evidence transient and within the assigned job path.
+- For pages without a PDF text layer, use the built-in transient RapidOCR fallback. OCR text and rendered OCR images must remain in memory; persist only the validated answer-free outline.
 - Persist only approved structural fields and fixed error codes; never persist page text, equations, answer keys, free-form reasons, or visual descriptions.
 - Require direct visual inspection capability for AI layout judgment. Fail the paper with `CAPABILITY_UNAVAILABLE` if that capability is absent.
 - Never create contact sheets or reconstruct clean prompt visuals from completed answer-key graphics.
 
 ## Workflow
 
-1. Run `prepare INPUT OUTPUT_ROOT` once. It creates a new immutable run, answer-free outlines, strict `ai_layout_job.attempt-1.json` jobs, and transient source pages.
+- Preserve a concise problem summary in a major-question heading only when the source prints that summary next to the question number; otherwise render only the question number, score, and percentage. Render the heading as `第 N 题 [原题简述]（X 分，占 Y%）` and never append a full-width or half-width period after the closing parenthesis.
+- Before applying the 30% pagination rules, calculate each block's rendered page cost from its qspec answer height, the configured horizontal-rule width, and any major-question title height at that position. Apply alignment growth to item-level heights and repaginate before recompilation; if page membership changes, discard stale page-indexed top spacers and remeasure the bounded alignment loop. Never allow a post-pagination adjustment to bypass whole-block pagination.
+
+1. Run `prepare INPUT OUTPUT_ROOT` once. It creates a new immutable run, answer-free outlines, strict `ai_layout_job.attempt-1.json` jobs, and transient source pages. Image-only PDF pages automatically use the in-memory OCR fallback at `220 DPI`; no OCR transcript or OCR page image is written.
 2. Schedule one fresh-context visual worker per whole paper with bounded concurrency. Each worker may write only the `allowed_output_path` in its job: `ai_layout.attempt-N.json`.
 3. Run `accept-ai-layout` for each completed attempt. Only the main Agent may promote validated output to formal `ai_layout.json`.
 4. As soon as one paper reaches `ai_layout_valid`, run `build --paper PAPER_ID`. Serialize local XeLaTeX builds while other visual workers continue.

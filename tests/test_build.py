@@ -151,6 +151,88 @@ questions:
     assert '"page": 2' in report
 
 
+def test_alignment_accepts_a_bounded_repagination_after_height_growth(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spec_path = tmp_path / "qspec.yaml"
+    spec_path.write_text(
+        """
+schema_version: 1
+paper:
+  title: Repagination Test
+  page_size: A4
+  omit_front_page: true
+  total_score: 30
+  margin: {top: 12mm, bottom: 12mm, left: 10mm, right: 10mm}
+style: {label_width: 13mm, border_width: 0.6pt, box_gap: 1.5mm, title_gap: 2mm}
+questions:
+  - id: "1"
+    title: One
+    score: 10
+    percent: 34
+    blocks:
+      - {id: "1-1", kind: calculation, height: 130mm}
+      - {id: "1-2", kind: calculation, height: 130mm}
+      - {id: "1-3", kind: short_answer, height: 4mm}
+  - id: "2"
+    title: Two
+    score: 10
+    percent: 33
+    blocks:
+      - {id: "2-1", kind: calculation, height: 130mm, force_page_break_before: true}
+      - {id: "2-2", kind: calculation, height: 130mm}
+  - id: "3"
+    title: Three
+    score: 10
+    percent: 33
+    blocks:
+      - {id: "3-1", kind: short_answer, height: 20mm, force_page_break_before: true}
+""",
+        encoding="utf-8",
+    )
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+    tex_path = build_dir / "answercard.tex"
+    pdf_path = build_dir / "answercard.pdf"
+    measurement_counts: list[int] = []
+
+    def fake_measure(path: Path, *, skip_pages: int) -> list[FrameMeasurement]:
+        assert path == pdf_path
+        assert skip_pages == 0
+        if not measurement_counts:
+            result = [
+                FrameMeasurement(page=1, top_from_page_top_mm=16.0, bottom_from_page_bottom_mm=19.0),
+                FrameMeasurement(page=2, top_from_page_top_mm=16.0, bottom_from_page_bottom_mm=16.0),
+                FrameMeasurement(page=3, top_from_page_top_mm=16.0, bottom_from_page_bottom_mm=60.0),
+            ]
+        else:
+            result = [
+                FrameMeasurement(page=index, top_from_page_top_mm=16.0, bottom_from_page_bottom_mm=16.0)
+                for index in range(1, 5)
+            ]
+        measurement_counts.append(len(result))
+        return result
+
+    compile_mock = Mock()
+    monkeypatch.setattr(build_script, "measure_pdf_frames", fake_measure)
+    monkeypatch.setattr(build_script, "_compile_tex", compile_mock)
+
+    build_script._align_compiled_pages(
+        spec_path,
+        tex_path,
+        pdf_path,
+        build_dir,
+        xelatex="xelatex",
+        max_passes=2,
+        tolerance_mm=1.1,
+    )
+
+    assert measurement_counts == [3, 4]
+    compile_mock.assert_called_once()
+    tex = tex_path.read_text(encoding="utf-8")
+    assert tex.count(r"\par\newpage") == 3
+
+
 def test_build_cli_forwards_an_isolated_build_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

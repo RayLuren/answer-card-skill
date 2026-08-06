@@ -36,7 +36,8 @@ def test_render_tex_contains_questions_and_blocks_without_answers(tmp_path: Path
     assert "第39届 Chemy 化学奥林匹克模拟试题1答题纸" not in tex
     assert r"\QuestionTitle{1}{元素化学}{22}" in tex
     assert r"\QuestionTitle{2}{氟代试剂}{7}" in tex
-    assert r"{\QuestionTitleFont 第 #1 题 #2（#3 分\if\relax\detokenize{#4}\relax\else，占 #4\%\fi）。}\par" in tex
+    assert r"{\QuestionTitleFont 第 #1 题 #2（#3 分\if\relax\detokenize{#4}\relax\else，占 #4\%\fi）}\par" in tex
+    assert r"占 #4\%\fi）。" not in tex
     assert r"\nopagebreak[4]%" in tex
     assert r"\newcommand{\QuestionTitle}[4]{%" in tex
     assert r"\newcommand{\QuestionTitle}[4]{%" + "\n" + r"  \vspace" not in tex
@@ -50,8 +51,8 @@ def test_render_tex_contains_questions_and_blocks_without_answers(tmp_path: Path
     assert r"\vbox to #2{%" not in tex
     assert r"\newcommand{\AnswerBox}[2]{%" not in tex
     assert r"\usepackage{tabularx}" in tex
-    assert tex.count(r"\AnswerTableStart") == 3
-    assert tex.count(r"\AnswerTableEnd") == 3
+    assert tex.count(r"\AnswerTableStart") == 4
+    assert tex.count(r"\AnswerTableEnd") == 4
     assert tex.count(r"\begin{tabular}{|L|A|}") == 1
     assert tex.count(r"\end{tabular}") == 1
     assert r"\end{tabular}\par" in tex

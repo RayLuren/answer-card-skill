@@ -11,6 +11,7 @@ A blank answer-card generator for structured examinations such as chemistry comp
 
 - Process a directory of arbitrarily named first-level PDFs into blank answer cards.
 - Keep an auditable intermediate layer through `outline.json`, `ai_layout.json`, and qspec.
+- Automatically OCR pages without a text layer in memory, persisting only the answer-free `outline.json`.
 - Generate blocks only for leaf item ids in a hierarchy, with schema guards against parent/descendant collisions.
 - Use a visual-capable AI component to judge block layout, height, and prompt-side visual requirements.
 - Render the first page, answer body, and page numbers deterministically with Jinja2 and XeLaTeX.
@@ -33,7 +34,7 @@ The detailed roadmap is maintained in Chinese in [the human/Agent interface road
 - Python 3.11+
 - XeLaTeX available on `PATH`
 - Python dependencies declared in `pyproject.toml`
-- PyMuPDF for PDF page previews
+- PyMuPDF and `rapidocr-onnxruntime` are declared dependencies for previews and transient OCR
 - A visual-capable model or trusted visual tool for AI layout judgment
 
 Windows PowerShell example:
@@ -43,7 +44,6 @@ git clone https://github.com/RayLuren/answer-card-skill.git
 cd answer-card-skill
 python -m venv .venv
 .\.venv\Scripts\python -m pip install -e .
-.\.venv\Scripts\python -m pip install pymupdf
 ```
 
 To process a directory through Codex, use a request such as:
@@ -81,7 +81,7 @@ flowchart TD
     E -- Yes --> G[Validate and promote ai_layout]
     G --> H[Export visual requirements]
     H --> I[Generate and validate qspec]
-    I --> J[Paginate and render LaTeX]
+    I --> J[Count title and rule costs, apply 30% whole-block pagination, and render LaTeX]
     J --> K[Compile initial PDF]
     K --> L{Frames within 1.1mm default?}
     L -- Correctable --> J

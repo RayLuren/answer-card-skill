@@ -12,9 +12,11 @@ requires-python = ">=3.11"
 dependencies = [
   "jinja2",
   "pillow",
+  "pymupdf",
   "pypdf",
   "pytest",
   "pyyaml",
+  "rapidocr-onnxruntime",
 ]
 
 [project.urls]

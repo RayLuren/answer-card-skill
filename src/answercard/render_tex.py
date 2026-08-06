@@ -56,6 +56,7 @@ def render_tex(
     template_dir: str | Path = DEFAULT_TEMPLATE_DIR,
     template_name: str = DEFAULT_TEMPLATE_NAME,
     page_height_adjustments_mm: list[float] | None = None,
+    block_height_adjustments_mm: Mapping[str, float] | None = None,
     page_top_spacers_mm: list[float] | None = None,
     image_bindings: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> Path:
@@ -69,6 +70,7 @@ def render_tex(
         template_dir=template_dir,
         template_name=template_name,
         page_height_adjustments_mm=page_height_adjustments_mm,
+        block_height_adjustments_mm=block_height_adjustments_mm,
         page_top_spacers_mm=page_top_spacers_mm,
         front_page_asset_path=asset_path,
         image_bindings=image_bindings,
@@ -97,6 +99,7 @@ def render_spec(
     template_dir: str | Path = DEFAULT_TEMPLATE_DIR,
     template_name: str = DEFAULT_TEMPLATE_NAME,
     page_height_adjustments_mm: list[float] | None = None,
+    block_height_adjustments_mm: Mapping[str, float] | None = None,
     page_top_spacers_mm: list[float] | None = None,
     front_page_asset_path: str = "../assets/periodic-table.png",
     image_bindings: Mapping[str, Mapping[str, Any]] | None = None,
@@ -106,6 +109,7 @@ def render_spec(
     pages = plan_answer_pages(
         spec,
         page_height_adjustments_mm=page_height_adjustments_mm,
+        block_height_adjustments_mm=block_height_adjustments_mm,
         page_top_spacers_mm=page_top_spacers_mm,
     )
     environment = Environment(

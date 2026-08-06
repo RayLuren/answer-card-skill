@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import re
+import time
 from typing import Any, Iterable
 
 import yaml
@@ -39,6 +40,7 @@ SAFE_ERROR_MESSAGES = {
     "BUILD_FAILED": "The deterministic build or final validation failed.",
     "USER_ABORTED": "The paper was stopped by the batch operator.",
 }
+_ATOMIC_REPLACE_RETRY_DELAYS_SECONDS = (0.05, 0.1, 0.2)
 
 _TITLE_SUFFIX_RE = re.compile(
     r"(?:[\s._\-—–]+)?(?:参考答案|答案|详解)"
@@ -597,8 +599,19 @@ def atomic_write_json(path: str | Path, data: Any) -> Path:
         encoding="utf-8",
         newline="\n",
     )
-    os.replace(temporary, destination)
+    _replace_with_permission_retry(temporary, destination)
     return destination
+
+
+def _replace_with_permission_retry(source: Path, destination: Path) -> None:
+    for delay in (*_ATOMIC_REPLACE_RETRY_DELAYS_SECONDS, None):
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError:
+            if delay is None:
+                raise
+            time.sleep(delay)
 
 
 def _write_json_exclusive(path: Path, data: Any) -> None:

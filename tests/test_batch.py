@@ -190,3 +190,28 @@ def test_state_machine_is_atomic_and_rejects_illegal_transitions(tmp_path: Path)
     assert not list(tmp_path.glob(".*state*.tmp"))
     with pytest.raises(ValueError, match="illegal batch transition"):
         batch.transition_paper(state, "paper001", "validated")
+
+
+def test_atomic_write_json_retries_transient_permission_error(
+    tmp_path: Path, monkeypatch
+) -> None:
+    destination = tmp_path / "state.json"
+    real_replace = batch.os.replace
+    attempts = 0
+    delays: list[float] = []
+
+    def flaky_replace(source: Path, target: Path) -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise PermissionError("transient Windows file lock")
+        real_replace(source, target)
+
+    monkeypatch.setattr(batch.os, "replace", flaky_replace)
+    monkeypatch.setattr(batch.time, "sleep", delays.append)
+
+    batch.atomic_write_json(destination, {"status": "ready"})
+
+    assert attempts == 3
+    assert delays == [0.05, 0.1]
+    assert json.loads(destination.read_text(encoding="utf-8")) == {"status": "ready"}

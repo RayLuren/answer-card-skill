@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import re
 import sys
 
 
@@ -30,6 +31,7 @@ def main(argv: list[str] | None = None) -> int:
     stop_parser = subparsers.add_parser("stop")
     stop_parser.add_argument("stage")
     stop_parser.add_argument("--status", choices=("passed", "failed"), default="passed")
+    stop_parser.add_argument("--code", default=None)
 
     finish_parser = subparsers.add_parser("finish")
     finish_parser.add_argument("--status", choices=("passed", "failed"), default="passed")
@@ -46,7 +48,14 @@ def main(argv: list[str] | None = None) -> int:
             stage_id = timer.start_stage(args.stage, source=args.source)
             print(f"stage started: {stage_id} {args.stage}")
         elif args.command == "stop":
-            stage = timer.stop_stage(args.stage, status=args.status)
+            if args.status == "failed":
+                if not args.code:
+                    raise ValueError("failed stage stop requires --code")
+                if re.fullmatch(r"[A-Z][A-Z0-9_]*", args.code) is None:
+                    raise ValueError("failure code must use uppercase letters, digits, and underscores")
+            elif args.code is not None:
+                raise ValueError("passed stage stop must not include --code")
+            stage = timer.stop_stage(args.stage, status=args.status, error=args.code)
             print(f"stage stopped: {stage['id']} {stage['name']} {stage['duration_seconds']:.3f}s")
         elif args.command == "finish":
             timer.finish(status=args.status)

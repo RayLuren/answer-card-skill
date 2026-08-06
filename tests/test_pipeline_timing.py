@@ -1,9 +1,22 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 from pathlib import Path
+import sys
 
 from answercard.pipeline_timing import PipelineTimer
+
+
+PIPELINE_TIMER_SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "pipeline_timer.py"
+PIPELINE_TIMER_SPEC = importlib.util.spec_from_file_location(
+    "answercard_pipeline_timer_script", PIPELINE_TIMER_SCRIPT_PATH
+)
+assert PIPELINE_TIMER_SPEC is not None
+pipeline_timer_script = importlib.util.module_from_spec(PIPELINE_TIMER_SPEC)
+assert PIPELINE_TIMER_SPEC.loader is not None
+sys.modules[PIPELINE_TIMER_SPEC.name] = pipeline_timer_script
+PIPELINE_TIMER_SPEC.loader.exec_module(pipeline_timer_script)
 
 
 def test_pipeline_timer_persists_agent_and_script_stages(tmp_path: Path) -> None:
@@ -46,6 +59,31 @@ def test_pipeline_timer_marks_failed_stage_and_pipeline(tmp_path: Path) -> None:
     assert timer.data["status"] == "failed"
     assert timer.data["stages"][-1]["status"] == "failed"
     assert timer.data["total_duration_seconds"] >= 0
+
+
+def test_pipeline_timer_cli_records_fixed_failure_code(tmp_path: Path) -> None:
+    report_path = tmp_path / "pipeline_report.json"
+
+    assert pipeline_timer_script.main(
+        ["--report", str(report_path), "start", "ai_layout_judgment"]
+    ) == 0
+    assert pipeline_timer_script.main(
+        [
+            "--report",
+            str(report_path),
+            "stop",
+            "ai_layout_judgment",
+            "--status",
+            "failed",
+            "--code",
+            "AI_LAYOUT_CONFLICT",
+        ]
+    ) == 0
+
+    stored = json.loads(report_path.read_text(encoding="utf-8"))
+    assert stored["status"] == "failed"
+    assert stored["stages"][-1]["status"] == "failed"
+    assert stored["stages"][-1]["error"] == "AI_LAYOUT_CONFLICT"
 
 
 def test_pipeline_timer_migrates_existing_finalizer_report(tmp_path: Path) -> None:

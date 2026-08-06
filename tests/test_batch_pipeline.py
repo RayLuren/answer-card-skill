@@ -174,10 +174,10 @@ def test_build_only_accepted_paper_publishes_root_and_archives_audit(
     output.write_text(json.dumps(_valid_layout()), encoding="utf-8")
     batch_pipeline.accept_ai_layout(manifest_path, "paper001", output)
 
-    calls: list[str] = []
+    calls: list[tuple[str, bool]] = []
 
     def fake_pipeline(pdf_path: Path, **kwargs):
-        calls.append(Path(pdf_path).name)
+        calls.append((Path(pdf_path).name, kwargs["use_existing_outline"]))
         build_dir = Path(kwargs["build_dir"])
         (build_dir / "answercard.pdf").write_bytes(b"final-pdf")
         return object()
@@ -188,7 +188,7 @@ def test_build_only_accepted_paper_publishes_root_and_archives_audit(
     manifest = batch_contract.load_batch_manifest(manifest_path)
     first = manifest["papers"][0]
     second = manifest["papers"][1]
-    assert calls == [first["source"]["filename"]]
+    assert calls == [(first["source"]["filename"], True)]
     assert result["papers"]["paper001"]["status"] == "validated"
     assert result["papers"]["paper002"]["status"] == "awaiting_ai_layout"
     assert (Path(manifest["run_dir"]) / first["output_name"]).read_bytes() == b"final-pdf"

@@ -13,10 +13,17 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Extract reference-answer PDF structure to outline.json.")
     parser.add_argument("pdf_path", type=Path)
     parser.add_argument("output_path", type=Path)
+    parser.add_argument("--no-ocr", action="store_true", help="Disable OCR fallback for pages without text.")
+    parser.add_argument("--ocr-dpi", type=int, default=220)
     args = parser.parse_args(argv)
 
     try:
-        output_path = extract_outline(args.pdf_path, args.output_path)
+        output_path = extract_outline(
+            args.pdf_path,
+            args.output_path,
+            ocr_fallback=not args.no_ocr,
+            ocr_dpi=args.ocr_dpi,
+        )
     except (OSError, RuntimeError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

@@ -45,7 +45,7 @@ worker 不得猜路径、改 manifest/state、写正式 `ai_layout.json`，也�
 4. 禁止持久化或复述答案内容的安全边界；
 5. attempt 计时命令。
 
-不要传递旧 attempt 的布局结论、失败正文、自由视觉说明或主 Agent的推测。worker 在自己的 per-paper `pipeline_report.json` 中启动并停止 `ai_layout_judgment_attempt_N`。如果某项首次判断为 `unknown`，在同一 worker 内显式重看原页一次；仍不确定时使用合同规定的 `unknown`、`95mm` 和 fallback 标志。这不是整卷重试。
+不要传递旧 attempt 的布局结论、失败正文、自由视觉说明或主 Agent的推测。worker 在自己的 per-paper `pipeline_report.json` 中启动 `ai_layout_judgment_attempt_N`。只有 allowed output 写入并自检通过后才用默认 `passed` 停止；若因结构冲突、能力不足或工具中断而没有产出，必须用 `stop --status failed --code FIXED_CODE` 结束，固定码不得包含答案或自由描述。如果某项首次判断为 `unknown`，在同一 worker 内显式重看原页一次；仍不确定时使用合同规定的 `unknown`、`95mm` 和 fallback 标志。这不是整卷重试。
 
 ## 5. 并发与交错构建
 

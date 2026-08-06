@@ -1,6 +1,12 @@
 import json
+from types import SimpleNamespace
 
-from answercard.extract_outline import TextPage, parse_outline
+from answercard.extract_outline import (
+    TextPage,
+    _normalize_ocr_outline,
+    extract_pdf_text,
+    parse_outline,
+)
 
 
 def test_parse_outline_extracts_questions_items_scores_and_pages() -> None:
@@ -91,6 +97,56 @@ def test_parse_outline_supports_score_after_heading_line_and_fullwidth_digits() 
     assert question["items"][0] == {"id": "3-1", "page": 3}
 
 
+def test_parse_outline_keeps_nearby_summary_before_score() -> None:
+    outline = parse_outline(
+        [
+            TextPage(
+                page=1,
+                text="""
+第1题 材料化学（8分）
+1-1 写出必要步骤。
+""",
+            )
+        ]
+    )
+
+    assert outline["questions"][0]["title"] == "材料化学"
+
+
+def test_parse_outline_keeps_nearby_summary_after_score() -> None:
+    outline = parse_outline(
+        [
+            TextPage(
+                page=1,
+                text="""
+第2题（12分）配位化学
+2-1 完成表格。
+""",
+            )
+        ]
+    )
+
+    assert outline["questions"][0]["title"] == "配位化学"
+
+
+def test_parse_outline_does_not_mistake_same_line_question_body_for_summary() -> None:
+    outline = parse_outline(
+        [
+            TextPage(
+                page=1,
+                text="""
+第1题（8分）写出下列各反应的方程式。
+1-1 第一小题。
+""",
+            )
+        ]
+    )
+
+    serialized = json.dumps(outline, ensure_ascii=False)
+    assert outline["questions"][0]["title"] == "第1题"
+    assert "写出下列各反应" not in serialized
+
+
 def test_parse_outline_ignores_scoring_note_headings() -> None:
     outline = parse_outline(
         [
@@ -132,6 +188,23 @@ def test_parse_outline_does_not_treat_scientific_notation_as_subitem() -> None:
     )
 
     assert outline["questions"][0]["items"] == [{"id": "10-3-2", "page": 1}]
+
+
+def test_parse_outline_does_not_treat_inline_numeric_range_as_subitem() -> None:
+    outline = parse_outline(
+        [
+            TextPage(
+                page=1,
+                text="""
+第5题 定量分析（8分）
+样品适用范围为 5-100 mg。
+5-1 说明操作目的。
+""",
+            )
+        ]
+    )
+
+    assert outline["questions"][0]["items"] == [{"id": "5-1", "page": 1}]
 
 
 def test_parse_outline_does_not_include_item_scores_from_nearby_following_line() -> None:
@@ -216,3 +289,98 @@ def test_parse_outline_keeps_only_leaf_ids_when_parent_group_ids_are_present() -
         {"id": "6-3-2-2", "page": 1},
         {"id": "6-4", "page": 1},
     ]
+
+
+def test_extract_pdf_text_uses_transient_ocr_only_for_blank_pages(monkeypatch) -> None:
+    class FakePage:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+        def extract_text(self) -> str:
+            return self.text
+
+    monkeypatch.setattr(
+        "pypdf.PdfReader",
+        lambda _path: SimpleNamespace(pages=[FakePage("native structure"), FakePage("")]),
+    )
+    calls: list[tuple[list[int], int]] = []
+
+    def fake_ocr(_path, page_numbers, *, dpi):
+        calls.append((list(page_numbers), dpi))
+        return {2: "第2题（8分）\n2-1"}
+
+    monkeypatch.setattr("answercard.ocr_text.extract_ocr_page_texts", fake_ocr)
+
+    pages = extract_pdf_text("sample.pdf", ocr_dpi=240)
+
+    assert pages == [
+        TextPage(page=1, text="native structure"),
+        TextPage(page=2, text="第2题（8分）\n2-1", from_ocr=True),
+    ]
+    assert calls == [([2], 240)]
+
+
+def test_extract_pdf_text_can_disable_ocr_fallback(monkeypatch) -> None:
+    class FakePage:
+        def extract_text(self) -> str:
+            return ""
+
+    monkeypatch.setattr("pypdf.PdfReader", lambda _path: SimpleNamespace(pages=[FakePage()]))
+
+    pages = extract_pdf_text("sample.pdf", ocr_fallback=False)
+
+    assert pages == [TextPage(page=1, text="")]
+
+
+def test_normalize_ocr_outline_merges_duplicates_and_filters_implausible_ids() -> None:
+    outline = {
+        "source": "sample.pdf",
+        "questions": [
+            {
+                "id": "2",
+                "title": "第2题",
+                "score": 8,
+                "page": 2,
+                "items": [{"id": "2-2", "page": 2}, {"id": "2-12019", "page": 2}],
+            },
+            {
+                "id": "1",
+                "title": "第1题",
+                "score": 6,
+                "page": 1,
+                "items": [{"id": "1-2", "page": 1}, {"id": "1-1", "page": 1}],
+            },
+            {
+                "id": "2",
+                "title": "第2题",
+                "score": 8,
+                "page": 2,
+                "items": [{"id": "2-1", "page": 2}],
+            },
+        ],
+    }
+
+    normalized = _normalize_ocr_outline(outline, ocr_pages={1, 2})
+
+    assert [question["id"] for question in normalized["questions"]] == ["1", "2"]
+    assert [[item["id"] for item in question["items"]] for question in normalized["questions"]] == [
+        ["1-1", "1-2"],
+        ["2-1", "2-2"],
+    ]
+
+
+def test_normalize_ocr_outline_rejects_duplicate_score_conflicts() -> None:
+    outline = {
+        "source": "sample.pdf",
+        "questions": [
+            {"id": "1", "title": "第1题", "score": 6, "page": 1, "items": []},
+            {"id": "1", "title": "第1题", "score": 7, "page": 1, "items": []},
+        ],
+    }
+
+    try:
+        _normalize_ocr_outline(outline, ocr_pages={1})
+    except ValueError as exc:
+        assert str(exc) == "OCR duplicate question score conflict"
+    else:
+        raise AssertionError("expected OCR duplicate score conflict")

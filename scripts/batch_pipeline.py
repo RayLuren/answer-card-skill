@@ -258,6 +258,7 @@ def build_papers(manifest_path: Path, paper_id: str | None = None) -> dict[str, 
             run_full_pipeline(
                 paper["source"]["path"],
                 paper_title=paper["title"],
+                use_existing_outline=True,
                 outline_path=workspace / "outline.json",
                 ai_layout_path=workspace / "ai_layout.json",
                 visual_requirements_path=workspace / "visual_requirements.json",

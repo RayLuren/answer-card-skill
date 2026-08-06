@@ -71,6 +71,55 @@ def test_ai_layout_to_qspec_uses_ai_kind_and_height(tmp_path: Path) -> None:
     assert spec.questions[0].blocks[0].height == "24mm"
 
 
+def test_ai_layout_to_qspec_preserves_visual_title_decision(tmp_path: Path) -> None:
+    outline = _outline()
+    outline["questions"][0]["title"] = "第1题"
+    outline["questions"].append(
+        {
+            "id": "2",
+            "title": "材料化学",
+            "score": 10,
+            "page": 2,
+            "items": [{"id": "2-1", "page": 2}],
+        }
+    )
+    ai_layout = _ai_layout()
+    ai_layout["questions"][0]["percent"] = 50
+    ai_layout["questions"].append(
+        {
+            "id": "2",
+            "score": 10,
+            "percent": 50,
+            "percent_source": "printed",
+            "items": [
+                {
+                    "id": "2-1",
+                    "kind": "short_answer",
+                    "height": "24mm",
+                    "fallback_after_reinspection": False,
+                    "visual_requirement": "no_visual",
+                    "visual_type": "none",
+                }
+            ],
+        }
+    )
+    outline_path = tmp_path / "outline.json"
+    ai_layout_path = tmp_path / "ai_layout.json"
+    qspec_path = tmp_path / "qspec.yaml"
+    outline_path.write_text(json.dumps(outline), encoding="utf-8")
+    ai_layout_path.write_text(json.dumps(ai_layout), encoding="utf-8")
+
+    ai_layout_to_qspec(
+        outline_path,
+        ai_layout_path,
+        qspec_path,
+        paper_title="Chemistry Answer Card",
+    )
+
+    spec = load_spec(qspec_path)
+    assert [question.title for question in spec.questions] == ["第1题", "材料化学"]
+
+
 def test_ai_layout_unknown_kind_requires_reinspection() -> None:
     data = _ai_layout()
     data["questions"][0]["items"][0]["kind"] = "unknown"

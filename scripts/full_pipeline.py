@@ -68,6 +68,7 @@ def run_full_pipeline(
     *,
     paper_title: str,
     omit_front_page: bool = False,
+    use_existing_outline: bool = False,
     outline_path: str | Path | None = None,
     ai_layout_path: str | Path | None = None,
     visual_requirements_path: str | Path | None = None,
@@ -112,13 +113,21 @@ def run_full_pipeline(
         }
     )
 
-    written_outline = _run_stage(
-        "extract_outline",
-        extract_outline,
-        pdf_path,
-        resolved_outline_path,
-        timer=timer,
-    )
+    if use_existing_outline:
+        written_outline = _run_stage(
+            "reuse_existing_outline",
+            _require_existing_outline,
+            resolved_outline_path,
+            timer=timer,
+        )
+    else:
+        written_outline = _run_stage(
+            "extract_outline",
+            extract_outline,
+            pdf_path,
+            resolved_outline_path,
+            timer=timer,
+        )
     outline_counts = _run_stage(
         "read_outline_summary", _read_outline_counts, written_outline, timer=timer
     )
@@ -282,6 +291,13 @@ def _require_ai_layout(ai_layout_path: str | Path) -> Path:
     return path
 
 
+def _require_existing_outline(outline_path: str | Path) -> Path:
+    path = Path(outline_path)
+    if not path.is_file():
+        raise ValueError(f"frozen outline does not exist: {path}")
+    return path
+
+
 def _percent_source_report(ai_layout: dict[str, object]) -> dict[str, object]:
     questions = ai_layout.get("questions")
     if not isinstance(questions, list):
@@ -426,6 +442,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("pdf_path", type=Path)
     parser.add_argument("--paper-title", required=True)
     parser.add_argument("--omit-front-page", action="store_true")
+    parser.add_argument("--use-existing-outline", action="store_true")
     parser.add_argument("--outline-path", type=Path, default=None)
     parser.add_argument("--ai-layout-path", type=Path, default=None)
     parser.add_argument("--visual-requirements-path", type=Path, default=None)
@@ -451,6 +468,7 @@ def main(argv: list[str] | None = None) -> int:
             args.pdf_path,
             paper_title=args.paper_title,
             omit_front_page=args.omit_front_page,
+            use_existing_outline=args.use_existing_outline,
             outline_path=args.outline_path,
             ai_layout_path=args.ai_layout_path,
             visual_requirements_path=args.visual_requirements_path,
