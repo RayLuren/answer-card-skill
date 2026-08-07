@@ -1,4 +1,9 @@
-from answercard.layout import PaginationEvent, fill_page_remainders, plan_answer_pages
+from answercard.layout import (
+    PaginationEvent,
+    adjust_planned_pages,
+    fill_page_remainders,
+    plan_answer_pages,
+)
 from answercard.schema import AnswerCardSpec, BlockSpec, PaperSpec, QuestionSpec, StyleSpec
 
 
@@ -156,6 +161,29 @@ def test_page_height_growth_is_repaginated_before_rendering() -> None:
     assert len(pages) == 2
     assert [block.height for block in pages[0].questions[0].blocks] == ["131mm", "131mm"]
     assert [block.height for block in pages[1].questions[0].blocks] == ["5mm"]
+
+
+def test_adjust_planned_pages_preserves_page_membership_and_applies_exact_delta() -> None:
+    spec = _single_question_spec(["30mm", "40mm", "50mm"])
+    pages = plan_answer_pages(spec)
+
+    adjusted = adjust_planned_pages(
+        pages,
+        [9.0],
+        page_top_spacers_mm=[2.5],
+    )
+
+    assert [block.block.id for block in adjusted[0].questions[0].blocks] == [
+        "1-1",
+        "1-2",
+        "1-3",
+    ]
+    assert [block.height for block in adjusted[0].questions[0].blocks] == [
+        "33mm",
+        "43mm",
+        "53mm",
+    ]
+    assert adjusted[0].top_spacer_mm == 2.5
 
 
 def test_multiline_question_title_height_is_counted_before_pagination() -> None:

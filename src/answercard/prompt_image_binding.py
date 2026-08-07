@@ -14,6 +14,7 @@ import yaml
 
 from answercard.schema import AnswerCardSpec, load_spec
 from answercard.visual_requirements import load_visual_requirements
+from answercard.visual_requirements import visual_item_machine_id
 
 
 CURRENT_PROMPT_IMAGE_BINDING_SCHEMA_VERSION = 2
@@ -226,12 +227,13 @@ def write_adjusted_visual_requirements(
         seen = set()
         for item in question.get("items", []):
             item = copy.deepcopy(item)
-            item_id = str(item.get("id"))
+            item_id = visual_item_machine_id(item)
+            id_key = "item_id" if "item_id" in item else "id"
             if item_id in merges:
                 target = merges[item_id]
                 if target in seen:
                     continue
-                item["id"] = target
+                item[id_key] = target
                 item["visual_requirement"] = "no_visual"
                 item["visual_type"] = "none"
                 item["requires_preprinted_visual"] = False
@@ -471,7 +473,7 @@ def _visual_binding_ids(data: dict[str, Any]) -> tuple[set[str], set[str], set[s
     uncertain: set[str] = set()
     for question in data["questions"]:
         for item in question["items"]:
-            item_id = str(item["id"])
+            item_id = visual_item_machine_id(item)
             if item["requires_preprinted_visual"] is True:
                 required.add(item_id)
             elif item["visual_requirement"] == "uncertain":
@@ -511,8 +513,8 @@ def _reject_unknown(data: dict[str, Any], allowed: set[str], context: str) -> No
         )
 
 
-def _id_sort_key(value: str) -> tuple[int, ...]:
+def _id_sort_key(value: str) -> tuple[object, ...]:
     try:
-        return tuple(int(part) for part in value.split("-"))
+        return (0, *(int(part) for part in value.split("-")))
     except ValueError:
-        return (10**9,)
+        return (1, value)

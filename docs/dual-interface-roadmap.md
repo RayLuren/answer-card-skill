@@ -1,5 +1,7 @@
 # 人类界面与 AI Agent 界面建设路线图
 
+> 历史路线说明：本文记录 v0.3.x 接口设想，尚未按 v0.4.0 整卷视觉契约完成独立架构评审，不得作为当前生产命令或数据合同。当前合同以 `README.md`、`docs/data-contracts.md` 和 `references/codex-batch-orchestration.md` 为准。
+
 状态：长期路线图。Codex CLI 托管的批量 v1 已落地；通用人类界面和其他宿主仍需用户确认后实施。
 
 ## 当前项目所处阶段

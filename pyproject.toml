@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "answer-card-skill"
-version = "0.3.0"
+version = "0.4.0"
 description = "Auditable Python and LaTeX pipeline for generating blank answer-card PDFs."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -13,10 +13,8 @@ dependencies = [
   "jinja2",
   "pillow",
   "pymupdf",
-  "pypdf",
   "pytest",
   "pyyaml",
-  "rapidocr-onnxruntime",
 ]
 
 [project.urls]

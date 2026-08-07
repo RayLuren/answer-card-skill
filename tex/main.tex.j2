@@ -189,25 +189,25 @@
 ((* endif *))
 ((* for planned_question in page.questions *))
 ((* if planned_question.show_title *))
-\QuestionTitle{((( planned_question.question.id | latex_escape )))}{((( planned_question.question.title | question_title_suffix(planned_question.question.id) | latex_escape )))}{((( planned_question.question.score )))}{((( planned_question.question.percent if planned_question.question.percent is not none else "" )))}
+\QuestionTitle{((( planned_question.question.display_id | latex_escape )))}{((( planned_question.question.title | question_title_suffix(planned_question.question.display_id) | latex_escape )))}{((( planned_question.question.score )))}{((( planned_question.question.percent if planned_question.question.percent is not none else "" )))}
 ((* endif *))
 \AnswerTableStart
 ((* for planned_block in planned_question.blocks *))
 ((* set image_binding = image_bindings.get(planned_block.block.id) *))
 ((* if image_binding and image_binding.mode == "horizontal_repeat" *))
-\AnswerImageRepeatRow{((( planned_block.block.id | latex_escape )))}{((( planned_block.height )))}{((( image_binding.repeat_count )))}{((( image_binding.gap_mm )))mm}{((( image_binding.total_gap_mm )))mm}{%
+\AnswerImageRepeatRow{((( planned_block.block.display_id | latex_escape )))}{((( planned_block.height )))}{((( image_binding.repeat_count )))}{((( image_binding.gap_mm )))mm}{((( image_binding.total_gap_mm )))mm}{%
 ((* for repeat_index in range(image_binding.repeat_count) *))
 \AnswerImageRepeatGraphic{((( image_binding.asset_path )))}{((( planned_block.height )))}((* if not loop.last *))\hspace{((( image_binding.gap_mm )))}mm((* endif *))%
 ((* endfor *))
 }
 ((* elif image_binding and image_binding.mode == "top_right" *))
-\AnswerImageTopRightRow{((( planned_block.block.id | latex_escape )))}{((( planned_block.height )))}{((( image_binding.asset_path )))}{((( image_binding.height_ratio )))}{((( image_binding.clearance_mm )))mm}
+\AnswerImageTopRightRow{((( planned_block.block.display_id | latex_escape )))}{((( planned_block.height )))}{((( image_binding.asset_path )))}{((( image_binding.height_ratio )))}{((( image_binding.clearance_mm )))mm}
 ((* elif image_binding and image_binding.mode == "bottom_center" *))
-\AnswerImageBottomCenterRow{((( planned_block.block.id | latex_escape )))}{((( planned_block.height )))}{((( image_binding.asset_path )))}{((( image_binding.height_ratio )))}{((( image_binding.clearance_mm )))mm}
+\AnswerImageBottomCenterRow{((( planned_block.block.display_id | latex_escape )))}{((( planned_block.height )))}{((( image_binding.asset_path )))}{((( image_binding.height_ratio )))}{((( image_binding.clearance_mm )))mm}
 ((* elif image_binding *))
-\AnswerImageRow{((( planned_block.block.id | latex_escape )))}{((( planned_block.height )))}{((( image_binding.asset_path )))}
+\AnswerImageRow{((( planned_block.block.display_id | latex_escape )))}{((( planned_block.height )))}{((( image_binding.asset_path )))}
 ((* else *))
-\AnswerRow{((( planned_block.block.id | latex_escape )))}{((( planned_block.height )))}
+\AnswerRow{((( planned_block.block.display_id | latex_escape )))}{((( planned_block.height )))}
 ((* endif *))
 ((* endfor *))
 \AnswerTableEnd

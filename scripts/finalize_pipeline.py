@@ -13,6 +13,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from answercard.layout import plan_answer_pages
+from answercard.ai_paper_schema import READY, ai_paper_audit, load_ai_paper_spec
 from answercard.frame_alignment import (
     DEFAULT_ALIGNMENT_TOLERANCE_MM,
     load_alignment_pass_summaries,
@@ -24,9 +25,7 @@ from answercard.visual_requirements import (
     visual_requirement_counts,
     visual_requirement_report_data,
 )
-from pypdf import PdfReader
-
-
+DEFAULT_AI_PAPER_PATH = PROJECT_ROOT / "build" / "ai_paper_spec.json"
 DEFAULT_QSPEC_PATH = PROJECT_ROOT / "spec" / "qspec.draft.yaml"
 DEFAULT_BUILD_DIR = PROJECT_ROOT / "build"
 DEFAULT_TEX_NAME = "answercard.tex"
@@ -60,6 +59,8 @@ class FinalizePipelineError(RuntimeError):
 
 def finalize_pipeline(
     *,
+    ai_paper_path: str | Path | None = DEFAULT_AI_PAPER_PATH,
+    ai_page_count: int | None = None,
     qspec_path: str | Path = DEFAULT_QSPEC_PATH,
     pdf_path: str | Path = DEFAULT_PDF_PATH,
     pages_dir: str | Path = DEFAULT_PAGES_DIR,
@@ -81,6 +82,7 @@ def finalize_pipeline(
     if alignment_tolerance_mm < 0:
         raise ValueError("alignment_tolerance_mm must be zero or greater")
 
+    ai_paper = Path(ai_paper_path) if ai_paper_path is not None else None
     qspec = Path(qspec_path)
     pdf = Path(pdf_path)
     previews = Path(pages_dir)
@@ -97,6 +99,7 @@ def finalize_pipeline(
     timer.ensure_running(reset_if_finished=False)
     report = timer.data
     report["finalization_inputs"] = {
+            "ai_paper_spec": str(ai_paper) if ai_paper is not None else None,
             "qspec": str(qspec),
             "tex": str(tex),
             "pdf": str(pdf),
@@ -126,6 +129,26 @@ def finalize_pipeline(
         if alignment_history:
             timer.update_result({"alignment_history": alignment_history})
         spec = _run_stage(timer, "validate_qspec", load_spec, qspec)
+        if spec.schema_version == 2:
+            if ai_paper is None:
+                raise ValueError("qspec v2 finalization requires ai_paper_spec.json")
+            if ai_page_count is None:
+                try:
+                    ai_page_count = int(timer.data["result"]["source_page_count"])
+                except (ValueError, KeyError, TypeError) as exc:
+                    raise ValueError("ai_page_count must be supplied or recorded in the pipeline report") from exc
+            if ai_page_count <= 0:
+                raise ValueError("ai_page_count must be a positive integer")
+            validated_ai = _run_stage(
+                timer,
+                "validate_ai_paper_spec",
+                load_ai_paper_spec,
+                ai_paper,
+                page_count=ai_page_count,
+            )
+            if validated_ai.get("status") != READY or validated_ai.get("review_items"):
+                raise ValueError("finalization requires ready AI output with all human review closed")
+            timer.update_result(ai_paper_audit(validated_ai))
         visual_result = _run_stage(
             timer,
             "validate_visual_requirements",
@@ -167,7 +190,12 @@ def finalize_pipeline(
         timer.update_result({
             "expected_body_pages": expected_body_pages,
             "front_pages": front_pages,
-            "printed_percent_total": sum(question.percent for question in spec.questions),
+            "qspec_percent_total": sum(question.percent for question in spec.questions),
+            **(
+                {"printed_percent_total": sum(question.percent for question in spec.questions)}
+                if spec.schema_version == 1
+                else {}
+            ),
             "final_pdf_pages": pdf_result["page_count"],
             "preview_count": preview_result["preview_count"],
             "page_number_rule": page_number_result["rule"],
@@ -205,6 +233,7 @@ def finalize_pipeline(
                 build,
                 keep_paths=(
                     build / DEFAULT_TEX_NAME,
+                    *((ai_paper,) if ai_paper is not None else ()),
                     pdf,
                     previews,
                     alignment_report,
@@ -273,27 +302,32 @@ def _validate_visual_requirements_for_spec(
 def _validate_pdf(pdf_path: Path, *, expected_total_pages: int) -> dict[str, Any]:
     if not pdf_path.exists() or pdf_path.stat().st_size <= 0:
         raise ValueError(f"final PDF is missing or empty: {pdf_path}")
-    reader = PdfReader(pdf_path)
-    if len(reader.pages) != expected_total_pages:
-        raise ValueError(
-            f"final PDF page count must be {expected_total_pages}, got {len(reader.pages)}"
-        )
-
+    try:
+        import fitz  # type: ignore[import-not-found]
+    except ImportError as exc:
+        raise ValueError("PyMuPDF is required for final PDF validation") from exc
     extracted_text: list[str] = []
-    for page_number, page in enumerate(reader.pages, start=1):
-        width = float(page.mediabox.width)
-        height = float(page.mediabox.height)
-        if abs(width - 595.28) > 1.0 or abs(height - 841.89) > 1.0:
+    with fitz.open(pdf_path) as document:
+        if document.page_count != expected_total_pages:
             raise ValueError(
-                f"final PDF page {page_number} is not A4: {width:.2f} x {height:.2f} pt"
+                f"final PDF page count must be {expected_total_pages}, got {document.page_count}"
             )
-        extracted_text.append(page.extract_text() or "")
+        for page_number in range(1, document.page_count + 1):
+            page = document.load_page(page_number - 1)
+            width = float(page.rect.width)
+            height = float(page.rect.height)
+            if abs(width - 595.28) > 1.0 or abs(height - 841.89) > 1.0:
+                raise ValueError(
+                    f"final PDF page {page_number} is not A4: {width:.2f} x {height:.2f} pt"
+                )
+            extracted_text.append(page.get_text() or "")
+        page_count = document.page_count
 
     combined_text = "\n".join(extracted_text)
     found_terms = [term for term in FORBIDDEN_PDF_TERMS if term in combined_text]
     if found_terms:
         raise ValueError("final PDF contains forbidden sensitive phrase(s): " + ", ".join(found_terms))
-    return {"page_count": len(reader.pages)}
+    return {"page_count": page_count}
 
 
 def _validate_compile_logs(log_paths: tuple[Path, ...]) -> dict[str, Any]:
@@ -432,6 +466,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Validate final answer-card artifacts, clean temp evidence, and prune build outputs."
     )
+    parser.add_argument("--ai-paper", type=Path, default=DEFAULT_AI_PAPER_PATH)
+    parser.add_argument("--ai-page-count", type=int, default=None)
     parser.add_argument("--qspec", type=Path, default=DEFAULT_QSPEC_PATH)
     parser.add_argument("--pdf", type=Path, default=DEFAULT_PDF_PATH)
     parser.add_argument("--pages-dir", type=Path, default=DEFAULT_PAGES_DIR)
@@ -457,6 +493,8 @@ def main(argv: list[str] | None = None) -> int:
     logs = tuple(args.log) if args.log else DEFAULT_LOG_PATHS
     try:
         report = finalize_pipeline(
+            ai_paper_path=args.ai_paper,
+            ai_page_count=args.ai_page_count,
             qspec_path=args.qspec,
             pdf_path=args.pdf,
             pages_dir=args.pages_dir,

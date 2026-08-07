@@ -1,90 +1,66 @@
-# Codex 批量调度合同
+# Codex 整卷视觉批处理编排
 
-## 目录
+本文描述 Codex host 如何并发调度视觉 worker；Python 核心不依赖任何线程 API。
 
-1. 宿主边界
-2. 准备与恢复
-3. Job 合同
-4. Worker 启动载荷
-5. 并发与交错构建
-6. 接纳与重试
-7. 终态与报告
-8. 安全持久化
-9. 完成检查
+## 准备
 
-## 1. 宿主边界
+普通调用只运行一次 `prepare INPUT OUTPUT_ROOT`。每次生成不可覆盖的 `run-*`，冻结来源文件名、大小和 SHA-256。恢复必须显式使用已有 `batch_manifest.json`。
 
-Python 核心只认识不可变 manifest、原子 state、严格 job、attempt 输出和确定性构建，不得引用 Codex 的线程、spawn、wait 或工具 API。Codex CLI 是 v1 唯一宿主；本文件是 Codex 适配层。
+`prepare` 只渲染 180 DPI 的整页 PNG，不提取 PDF 文字、不运行 OCR、不匹配题号、不生成 outline 或 skeleton。页面必须按 `page-001.png` 至末页完整存在。
 
-## 2. 准备与恢复
+## bounded concurrency
 
-普通调用执行一次 `prepare INPUT OUTPUT_ROOT`，每次创建新的 `run-*` 目录。恢复只能显式引用已有 `batch_manifest.json`，不得重新 prepare 到旧 run。
+视觉阶段采用 bounded concurrency。每个 fresh-context worker 负责 one whole paper，不能按页面或大题拆分。槽位不足时只排队，不得把试卷标记失败。确定性 PDF 构建始终串行。
 
-`prepare` 只发现输入目录第一层 PDF，按文件名稳定排序，生成 `paper001` 起的内部 ID，固化文件名、字节数和 SHA-256。后续每个命令都通过 manifest 定位文件；源指纹变化直接以 `SOURCE_CHANGED` 终止该卷。
+Worker 每次只读取：
 
-主 Agent在启动视觉 worker 前执行 `status`。若用户指定视觉并发数，使用该值；否则先读取宿主可用 agent 线程容量，为主 Agent预留一个槽位。无法可靠发现容量时最多安排 4 个视觉 worker。宿主槽位不足时把 job 留在队列中，不调用 `fail-paper`。
+- `ai_paper_job.revision-R.attempt-N.json`
+- 固定 `prompts/ai_paper_visual_extract.md`
+- job 指定的全部页面和必要时的原 PDF 局部放大
+- job 指定的严格人工确认 JSON（如有）
 
-## 3. Job 合同
+Worker 只能写 `allowed_output_path`，不得修改 manifest、state、正式 `ai_paper_spec.json` 或其他文件。不得输出说明、摘录或中间 JSON。
 
-每次 attempt 读取对应的 `ai_layout_job.attempt-N.json`。Job 固定：
+## 接纳和重试
 
-- batch、paper、attempt 标识；
-- 固定 prompt、outline、skeleton、源 PDF、逐页 PNG 目录；
-- 页数；
-- 唯一 allowed output 路径 `ai_layout.attempt-N.json`。
+主 Agent运行 `accept-ai-paper`。它只检查 JSON、安全字段、固定枚举、页码、高度和可渲染性，不与 OCR、outline、正则或另一模型比对，也不检查显示题号的重复、连续和层级。
 
-worker 不得猜路径、改 manifest/state、写正式 `ai_layout.json`，也不得写其他说明、摘录或中间 JSON。主 Agent必须通过 `accept-ai-layout` 接纳 attempt；不得手工复制为正式文件。
+无效 JSON、schema/安全失败、输出缺失或工具中断会删除无效 attempt，并创建一次不继承旧结论的 fresh-context attempt 2。第二次失败进入 `AI_RETRY_EXHAUSTED`。
 
-## 4. Worker 启动载荷
+单题 `unknown` 的显式复看发生在同一个 worker 内；若仍不确定使用 95mm fallback。This does not count as the whole-paper retry.
 
-为每卷启动一个 fresh-context subagent，并让它独占一整卷，不按页面或大题拆分。只传递：
+## 人工确认 revision
 
-1. 当前 job 的绝对路径；
-2. 必须完整读取 job 中固定 prompt 的要求；
-3. 只能写 allowed output 的限制；
-4. 禁止持久化或复述答案内容的安全边界；
-5. attempt 计时命令。
+`needs_human_review` 不是失败，也不消耗 attempt 2。主 Agent不得把候选值自行拼接成正式结构。
 
-不要传递旧 attempt 的布局结论、失败正文、自由视觉说明或主 Agent的推测。worker 在自己的 per-paper `pipeline_report.json` 中启动 `ai_layout_judgment_attempt_N`。只有 allowed output 写入并自检通过后才用默认 `passed` 停止；若因结构冲突、能力不足或工具中断而没有产出，必须用 `stop --status failed --code FIXED_CODE` 结束，固定码不得包含答案或自由描述。如果某项首次判断为 `unknown`，在同一 worker 内显式重看原页一次；仍不确定时使用合同规定的 `unknown`、`95mm` 和 fallback 标志。这不是整卷重试。
+1. 向用户展示固定 review id、页码、区域、目标和候选值。
+2. 用户文件必须一一覆盖当前 review id。
+3. 运行 `confirm-ai-paper` 冻结 `human_confirmation.revision-R.json`。
+4. 创建 attempt 1 的新 revision job。
+5. 新 fresh-context worker 重新检查整卷，而不是修补旧草稿。
 
-## 5. 并发与交错构建
+来源 PDF 指纹变化会使全部旧确认失效并终止该卷。
 
-维护一个有界视觉队列：
+## 构建和归档
 
-1. 空槽位领取下一份 awaiting job。
-2. worker 完成后立即释放槽位，让下一卷开始。
-3. 主 Agent随即运行 `accept-ai-layout`。
-4. 接纳成功的卷立即进入单卷 `build --paper`，不等待其他视觉 worker。
-5. 本地 XeLaTeX 构建始终串行；视觉 worker 可在构建期间继续并行。
+`build` 只接受 `ai_paper_valid`。它从正式 `ai_paper_spec.json` 生成 qspec v2 和 visual manifest，随后分页、XeLaTeX、200 DPI 页框测量、默认 1.1 mm 对齐、预览和 finalizer。
 
-任何 subagent 结束后都关闭旧线程。重试必须创建新 fresh context，不能继续旧线程。
+成功后 PDF 原子发布到 run 根目录，审计文件进入 `audit/paperNNN/`；失败诊断进入 `failed/paperNNN/`。两条终态路径都清理临时源页。等待人工确认期间必须保留页面证据以便新 revision 重看。
 
-## 6. 接纳与重试
+当且仅当所有卷为 `validated` 或 `failed` 时运行 `report` exactly once。重复调用返回已有正式报告。等待人工确认的卷可由 `status` 查看，但不得提前生成正式 task report。
 
-`accept-ai-layout` 依次检查 allowed output 路径、JSON、严格 schema、安全字段、outline 覆盖、分值、百分比和 fallback 合同。通过后才原子生成正式 `ai_layout.json`。
+## 命令
 
-首次出现无效 JSON、schema 失败、工具中断或临时证据读取失败时，关闭旧线程，读取 attempt 2 job，并在全新上下文中重试 exactly once。第二次可恢复失败以 `AI_RETRY_EXHAUSTED` 终止。
+```powershell
+python scripts/batch_pipeline.py prepare INPUT OUTPUT_ROOT
+python scripts/batch_pipeline.py status RUN\batch_manifest.json
+python scripts/batch_pipeline.py accept-ai-paper RUN\batch_manifest.json PAPER_ID ATTEMPT_JSON
+python scripts/batch_pipeline.py confirm-ai-paper RUN\batch_manifest.json PAPER_ID CONFIRMATION_JSON
+python scripts/batch_pipeline.py build RUN\batch_manifest.json --paper PAPER_ID
+python scripts/batch_pipeline.py fail-paper RUN\batch_manifest.json PAPER_ID --code CODE
+python scripts/batch_pipeline.py report RUN\batch_manifest.json
+```
 
-结构冲突、源变化、视觉能力不足或安全拒绝不重试。调用 `fail-paper` 时只传固定 code，不传页面正文或异常原文。
+Keep the default three correction passes unless the retained answer-free history demonstrates slow convergence. A bounded rebuild may use `--max-alignment-passes 4`; retain both the configured and default limits in the report, and keep the tolerance at `1.1mm`.
 
-## 7. 终态与报告
-
-`build` 只处理 `ai_layout_valid`；跳过 `validated` 和 `failed`，因此恢复调用不会重建终态卷。finalizer 成功后，发布 PDF 到 run 根目录，并把审计产物归档到 `audit/paperNNN/`。失败卷进入 `failed/paperNNN/`。两条路径都必须清理临时源页证据。
-
-当且仅当全部卷达到 `validated` 或 `failed`，调用一次 `report`。它生成一份 `task-report.md` 和一份 `run-report.json`。重复调用返回现有文件。部分失败不得阻止其他成功 PDF 发布或阻止终态总报告。
-
-## 8. 安全持久化
-
-允许持久化结构 ID、题型、高度、固定视觉类别、固定错误 code、计时、产物路径和校验结果。禁止持久化源页文字、答案、解答、方程正文、化学结构正文、free-form reason、visual description 或未经清洗的异常消息。无效 attempt 输出必须立即删除。
-
-第一版只交付无图初版与配图需求。不要自动绑定图片，不要从答案图重建题面图。
-
-## 9. 完成检查
-
-- 根目录成功 PDF 数等于 `run-report.json.success_count`。
-- 每个输入在 run report 中恰有一个终态。
-- `task-report.md` 和 `run-report.json` 各只有一份。
-- 成功审计目录与失败目录互斥。
-- `.tmp/batches/<batch-id>/` 不再保留已终态卷的源页。
-- 没有 worker 直接写正式 `ai_layout.json`。
-- 没有自动图片绑定或第二次成品 PDF AI 复核。
+视觉能力缺失使用 `CAPABILITY_UNAVAILABLE`。不得以纯文本推测代替视觉检查。

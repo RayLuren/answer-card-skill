@@ -171,6 +171,52 @@ def plan_answer_pages(
     return _build_planned_pages(pages, page_top_spacers_mm=page_top_spacers_mm)
 
 
+def adjust_planned_pages(
+    pages: list[PlannedPage],
+    page_height_adjustments_mm: list[float],
+    *,
+    page_top_spacers_mm: list[float] | None = None,
+) -> list[PlannedPage]:
+    """Adjust an already paginated plan without re-running threshold rules."""
+
+    if len(page_height_adjustments_mm) != len(pages):
+        raise ValueError("page height adjustments must cover every planned page")
+
+    adjusted_pages: list[PlannedPage] = []
+    for page_index, (page, total_delta) in enumerate(
+        zip(pages, page_height_adjustments_mm, strict=True),
+        start=1,
+    ):
+        block_count = sum(len(question.blocks) for question in page.questions)
+        if block_count == 0:
+            if abs(total_delta) > 0.001:
+                raise ValueError(f"planned page {page_index} has no block to adjust")
+            delta_per_block = 0.0
+        else:
+            delta_per_block = float(total_delta) / block_count
+
+        adjusted_questions: list[PlannedQuestion] = []
+        for question in page.questions:
+            adjusted_blocks: list[PlannedBlock] = []
+            for block in question.blocks:
+                height_mm = _dimension_to_mm(block.height) + delta_per_block
+                if height_mm <= 0:
+                    raise ValueError(
+                        f"alignment adjustment makes block {block.block.id} non-positive"
+                    )
+                adjusted_blocks.append(replace(block, height=_format_mm(height_mm)))
+            adjusted_questions.append(replace(question, blocks=adjusted_blocks))
+
+        adjusted_pages.append(
+            replace(
+                page,
+                questions=adjusted_questions,
+                top_spacer_mm=max(0.0, _page_value(page_top_spacers_mm, page_index)),
+            )
+        )
+    return adjusted_pages
+
+
 def _paginate_items(
     spec: AnswerCardSpec,
     *,
@@ -412,10 +458,10 @@ def _question_title_cost_mm(spec: AnswerCardSpec, question: QuestionSpec) -> flo
         return _QUESTION_TITLE_BLOCK_MM
 
     title = question.title.strip()
-    if title == f"第{question.id}题":
+    if title == f"第{question.display_id}题":
         title = ""
     percent = "" if question.percent is None else f"，占 {question.percent}%"
-    rendered = f"第 {question.id} 题 {title}（{question.score:g} 分{percent}）"
+    rendered = f"第 {question.display_id} 题 {title}（{question.score:g} 分{percent}）"
     width_units = sum(_title_character_width_units(character) for character in rendered)
     font_mm = _QUESTION_TITLE_FONT_PT * 25.4 / 72.27
     line_count = max(1, math.ceil(width_units * font_mm / available_width))

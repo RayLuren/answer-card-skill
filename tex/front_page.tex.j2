@@ -26,7 +26,7 @@
     \hline
     \textcolor{Accent}{题号}
 ((* for question in score_table.questions *))
-    & \textbf{((( question.id | latex_escape )))}
+    & \textbf{((( question.display_id | latex_escape )))}
 ((* endfor *))
     & \textbf{总分} \\
     \hline

@@ -15,35 +15,37 @@ import yaml
 
 
 BATCH_SCHEMA_VERSION = 1
-STATE_SCHEMA_VERSION = 1
-JOB_SCHEMA_VERSION = 1
+STATE_SCHEMA_VERSION = 2
+JOB_SCHEMA_VERSION = 2
 TERMINAL_STATUSES = {"validated", "failed"}
 PAPER_STATUSES = {
     "prepared",
-    "awaiting_ai_layout",
-    "ai_layout_running",
-    "ai_layout_valid",
+    "awaiting_ai_paper",
+    "ai_paper_running",
+    "needs_human_review",
+    "awaiting_human_confirmation",
+    "ai_paper_valid",
     "building",
     *TERMINAL_STATUSES,
 }
 RECOVERABLE_AI_CODES = {"AI_INVALID_JSON", "AI_SCHEMA_INVALID", "AI_OUTPUT_MISSING"}
 SAFE_ERROR_MESSAGES = {
-    "AI_INVALID_JSON": "AI layout output was not valid JSON.",
-    "AI_SCHEMA_INVALID": "AI layout output failed the strict schema or safety validation.",
-    "AI_OUTPUT_MISSING": "AI layout output was not written to the allowed attempt path.",
-    "AI_LAYOUT_CONFLICT": "AI layout conflicts with the answer-free structural outline.",
+    "AI_INVALID_JSON": "Whole-paper visual AI output was not valid JSON.",
+    "AI_SCHEMA_INVALID": "Whole-paper visual AI output failed strict safety or renderability validation.",
+    "AI_OUTPUT_MISSING": "Whole-paper visual AI output was not written to the allowed attempt path.",
+    "HUMAN_CONFIRMATION_INVALID": "Human confirmation did not match the current fixed review request.",
     "SOURCE_CHANGED": "The source PDF no longer matches the immutable batch manifest.",
     "CAPABILITY_UNAVAILABLE": "Required visual inspection capability is unavailable.",
     "TOOL_INTERRUPTED": "The visual worker was interrupted.",
     "TEMP_READ_FAILED": "Transient source-page evidence could not be read.",
-    "AI_RETRY_EXHAUSTED": "AI layout validation failed twice.",
+    "AI_RETRY_EXHAUSTED": "Whole-paper visual AI validation failed twice.",
     "BUILD_FAILED": "The deterministic build or final validation failed.",
     "USER_ABORTED": "The paper was stopped by the batch operator.",
 }
 _ATOMIC_REPLACE_RETRY_DELAYS_SECONDS = (0.05, 0.1, 0.2)
 
 _TITLE_SUFFIX_RE = re.compile(
-    r"(?:[\s._\-—–]+)?(?:参考答案|答案|详解)"
+    r"(?:[\s._\-—–]+)?(?:答案及评分标准|答案与评分细则|参考答案|评分标准|答案|详解)"
     r"(?:[\s._\-—–]+(?:p\s*)?\d+\s*[\-—–]\s*\d+)?\s*$",
     flags=re.IGNORECASE,
 )
@@ -356,12 +358,15 @@ def initial_batch_state(manifest: dict[str, Any]) -> dict[str, Any]:
             paper["id"]: {
                 "status": "prepared",
                 "attempt": 1,
+                "revision": 0,
                 "job_path": None,
+                "review_path": None,
+                "confirmation_path": None,
                 "report_path": str(Path(paper["workspace"]) / "pipeline_report.json"),
                 "published_pdf": None,
                 "archive_path": None,
                 "error": None,
-                "history": [{"status": "prepared", "attempt": 1}],
+                "history": [{"status": "prepared", "attempt": 1, "revision": 0}],
             }
             for paper in manifest["papers"]
         },
@@ -392,7 +397,10 @@ def validate_batch_state(data: Any, manifest: dict[str, Any]) -> dict[str, Any]:
         allowed = {
             "status",
             "attempt",
+            "revision",
             "job_path",
+            "review_path",
+            "confirmation_path",
             "report_path",
             "published_pdf",
             "archive_path",
@@ -405,6 +413,9 @@ def validate_batch_state(data: Any, manifest: dict[str, Any]) -> dict[str, Any]:
         attempt = state.get("attempt")
         if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt not in {1, 2}:
             raise ValueError(f"batch state {paper_id}.attempt must be 1 or 2")
+        revision = state.get("revision")
+        if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
+            raise ValueError(f"batch state {paper_id}.revision must be a non-negative integer")
         history = state.get("history")
         if not isinstance(history, list) or not history:
             raise ValueError(f"batch state {paper_id}.history must be a non-empty list")
@@ -433,10 +444,12 @@ def transition_paper(
     paper = state["papers"][paper_id]
     current = paper["status"]
     allowed = {
-        "prepared": {"awaiting_ai_layout", "failed"},
-        "awaiting_ai_layout": {"ai_layout_running", "failed"},
-        "ai_layout_running": {"ai_layout_valid", "awaiting_ai_layout", "failed"},
-        "ai_layout_valid": {"building", "failed"},
+        "prepared": {"awaiting_ai_paper", "failed"},
+        "awaiting_ai_paper": {"ai_paper_running", "failed"},
+        "ai_paper_running": {"ai_paper_valid", "needs_human_review", "awaiting_ai_paper", "failed"},
+        "needs_human_review": {"awaiting_human_confirmation", "failed"},
+        "awaiting_human_confirmation": {"awaiting_ai_paper", "failed"},
+        "ai_paper_valid": {"building", "failed"},
         "building": {"validated", "failed"},
         "validated": set(),
         "failed": set(),
@@ -445,125 +458,140 @@ def transition_paper(
         raise ValueError(f"illegal batch transition for {paper_id}: {current} -> {status}")
     if attempt is not None:
         if attempt not in {1, 2}:
-            raise ValueError("AI layout attempt must be 1 or 2")
+            raise ValueError("AI paper attempt must be 1 or 2")
         paper["attempt"] = attempt
     paper["status"] = status
     paper["error"] = safe_error(error_code) if error_code else None
-    paper["history"].append({"status": status, "attempt": paper["attempt"]})
+    paper["history"].append(
+        {"status": status, "attempt": paper["attempt"], "revision": paper["revision"]}
+    )
     return paper
 
 
-def make_ai_layout_job(
+def make_ai_paper_job(
     manifest: dict[str, Any],
     paper_id: str,
     *,
     attempt: int,
+    revision: int,
     prompt_path: str | Path,
-    outline_path: str | Path,
-    skeleton_path: str | Path,
     source_pages_dir: str | Path,
     page_count: int,
+    human_confirmation_path: str | Path | None = None,
 ) -> dict[str, Any]:
     paper = paper_by_id(manifest, paper_id)
     workspace = Path(paper["workspace"])
-    return validate_ai_layout_job(
+    output_name = f"ai_paper_spec.revision-{revision}.attempt-{attempt}.json"
+    return validate_ai_paper_job(
         {
             "schema_version": JOB_SCHEMA_VERSION,
             "batch_id": manifest["batch_id"],
             "paper_id": paper_id,
             "attempt": attempt,
+            "revision": revision,
             "prompt_path": str(Path(prompt_path).resolve()),
-            "outline_path": str(Path(outline_path).resolve()),
-            "skeleton_path": str(Path(skeleton_path).resolve()),
             "source_pdf": paper["source"]["path"],
             "source_pages_dir": str(Path(source_pages_dir).resolve()),
             "page_count": page_count,
-            "allowed_output_path": str((workspace / f"ai_layout.attempt-{attempt}.json").resolve()),
+            "human_confirmation_path": (
+                str(Path(human_confirmation_path).resolve()) if human_confirmation_path else None
+            ),
+            "allowed_output_path": str((workspace / output_name).resolve()),
         },
         manifest,
     )
 
 
-def validate_ai_layout_job(data: Any, manifest: dict[str, Any]) -> dict[str, Any]:
+def validate_ai_paper_job(data: Any, manifest: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(data, dict):
-        raise ValueError("AI layout job must be an object")
+        raise ValueError("AI paper job must be an object")
     allowed = {
         "schema_version",
         "batch_id",
         "paper_id",
         "attempt",
+        "revision",
         "prompt_path",
-        "outline_path",
-        "skeleton_path",
         "source_pdf",
         "source_pages_dir",
         "page_count",
+        "human_confirmation_path",
         "allowed_output_path",
     }
-    _reject_unknown(data, allowed, "AI layout job")
+    _reject_unknown(data, allowed, "AI paper job")
     if data.get("schema_version") != JOB_SCHEMA_VERSION:
-        raise ValueError("AI layout job has an unsupported schema version")
+        raise ValueError("AI paper job has an unsupported schema version")
     if data.get("batch_id") != manifest["batch_id"]:
-        raise ValueError("AI layout job batch_id does not match manifest")
+        raise ValueError("AI paper job batch_id does not match manifest")
     paper_id = data.get("paper_id")
     paper = paper_by_id(manifest, paper_id)
     attempt = data.get("attempt")
     if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt not in {1, 2}:
-        raise ValueError("AI layout job attempt must be 1 or 2")
+        raise ValueError("AI paper job attempt must be 1 or 2")
+    revision = data.get("revision")
+    if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
+        raise ValueError("AI paper job revision must be a non-negative integer")
     for key in (
         "prompt_path",
-        "outline_path",
-        "skeleton_path",
         "source_pdf",
         "source_pages_dir",
         "allowed_output_path",
     ):
-        _required_string(data, key, "AI layout job")
+        _required_string(data, key, "AI paper job")
+    confirmation = data.get("human_confirmation_path")
+    if confirmation is not None and (not isinstance(confirmation, str) or not confirmation.strip()):
+        raise ValueError("AI paper job human_confirmation_path must be null or a path")
     page_count = data.get("page_count")
     if isinstance(page_count, bool) or not isinstance(page_count, int) or page_count <= 0:
-        raise ValueError("AI layout job page_count must be a positive integer")
+        raise ValueError("AI paper job page_count must be a positive integer")
 
     workspace = Path(paper["workspace"]).resolve()
     evidence = Path(paper["evidence_dir"]).resolve()
     expected_paths = {
-        "outline_path": workspace / "outline.json",
-        "skeleton_path": workspace / "ai_layout.skeleton.json",
         "source_pdf": Path(paper["source"]["path"]).resolve(),
         "source_pages_dir": evidence / "source-pages",
-        "allowed_output_path": workspace / f"ai_layout.attempt-{attempt}.json",
+        "allowed_output_path": workspace / f"ai_paper_spec.revision-{revision}.attempt-{attempt}.json",
     }
     for key, expected in expected_paths.items():
         if Path(data[key]).resolve() != expected:
-            raise ValueError(f"AI layout job {key} is outside its assigned path")
+            raise ValueError(f"AI paper job {key} is outside its assigned path")
+    expected_confirmation = workspace / f"human_confirmation.revision-{revision}.json"
+    if revision == 0:
+        if confirmation is not None:
+            raise ValueError("revision 0 must not have human confirmation")
+    elif confirmation is None or Path(confirmation).resolve() != expected_confirmation:
+        raise ValueError("AI paper job human confirmation is outside its immutable revision path")
     prompt = Path(data["prompt_path"]).resolve()
-    if prompt.name != "ai_layout_judge.md" or prompt.parent.name != "prompts":
-        raise ValueError("AI layout job prompt_path is not the fixed project prompt")
+    if prompt.name != "ai_paper_visual_extract.md" or prompt.parent.name != "prompts":
+        raise ValueError("AI paper job prompt_path is not the fixed project prompt")
     return data
 
 
-def write_ai_layout_job(data: dict[str, Any], path: str | Path, manifest: dict[str, Any]) -> Path:
-    validated = validate_ai_layout_job(data, manifest)
+def write_ai_paper_job(data: dict[str, Any], path: str | Path, manifest: dict[str, Any]) -> Path:
+    validated = validate_ai_paper_job(data, manifest)
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_json(destination, validated)
     return destination
 
 
-def load_ai_layout_job(path: str | Path, manifest: dict[str, Any]) -> dict[str, Any]:
+def load_ai_paper_job(path: str | Path, manifest: dict[str, Any]) -> dict[str, Any]:
     source = Path(path)
     if not source.is_file():
-        raise ValueError(f"AI layout job does not exist: {source}")
-    job = validate_ai_layout_job(json.loads(source.read_text(encoding="utf-8")), manifest)
-    for key in ("prompt_path", "outline_path", "skeleton_path", "source_pdf"):
+        raise ValueError(f"AI paper job does not exist: {source}")
+    job = validate_ai_paper_job(json.loads(source.read_text(encoding="utf-8")), manifest)
+    for key in ("prompt_path", "source_pdf"):
         if not Path(job[key]).is_file():
-            raise ValueError(f"AI layout job input is missing: {key}")
+            raise ValueError(f"AI paper job input is missing: {key}")
+    if job["human_confirmation_path"] is not None and not Path(job["human_confirmation_path"]).is_file():
+        raise ValueError("AI paper job human confirmation is missing")
     source_pages = Path(job["source_pages_dir"])
     if not source_pages.is_dir():
-        raise ValueError("AI layout job source_pages_dir is missing")
+        raise ValueError("AI paper job source_pages_dir is missing")
     expected_names = [f"page-{index:03d}.png" for index in range(1, job["page_count"] + 1)]
     actual_names = [path.name for path in sorted(source_pages.glob("page-*.png"))]
     if actual_names != expected_names:
-        raise ValueError("AI layout job source page count or names do not match the job")
+        raise ValueError("AI paper job source page count or names do not match the job")
     return job
 
 

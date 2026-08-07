@@ -116,6 +116,24 @@ def test_task_report_records_all_stages_and_tolerance_change(tmp_path: Path) -> 
     assert "| 模拟试题 01 答题卡 | 7-3-1 | — | — | — | 通过 |" in text
 
 
+def test_report_shows_display_id_without_machine_id(tmp_path: Path) -> None:
+    source = _write_report(
+        tmp_path / "paper37" / "pipeline_report.json",
+        label="第37届国初答题卡",
+        tolerance=1.1,
+    )
+    data = json.loads(source.read_text(encoding="utf-8"))
+    data["result"]["preprinted_visual_items"][0]["id"] = "q009-i001"
+    data["result"]["preprinted_visual_items"][0]["display_id"] = "9-1"
+    source.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+    output = write_task_report([source], tmp_path / "task-report.md")
+    text = output.read_text(encoding="utf-8")
+
+    assert "| 第37届国初答题卡 | 9-1 | — | — | — | 通过 |" in text
+    assert "q009-i001" not in text
+
+
 def test_task_report_details_every_failed_alignment_pass(tmp_path: Path) -> None:
     source = _write_report(
         tmp_path / "pipeline_report.json",

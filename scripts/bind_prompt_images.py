@@ -97,6 +97,7 @@ def bind_prompt_images(
         staged_visual = staging / "visual_requirements.json"
         staged_report = staging / "pipeline_report.json"
         staged_manifest = staging / "prompt_image_binding.json"
+        staged_ai_paper: Path | None = None
         staged_assets = staging / "binding-assets"
         staged_assets.mkdir()
 
@@ -107,6 +108,15 @@ def bind_prompt_images(
                 "PIPELINE_REPORT_MISSING", f"pipeline report is missing: {formal_report}"
             )
         shutil.copy2(manifest.path, staged_manifest)
+        input_spec = load_spec(qspec)
+        if input_spec.schema_version == 2:
+            formal_ai_paper = formal_build / "ai_paper_spec.json"
+            if not formal_ai_paper.is_file():
+                raise PromptImageBindingError(
+                    "AI_PAPER_SPEC_MISSING", f"whole-paper visual AI spec is missing: {formal_ai_paper}"
+                )
+            staged_ai_paper = staging / "ai_paper_spec.json"
+            shutil.copy2(formal_ai_paper, staged_ai_paper)
         height_overrides = write_adjusted_qspec(qspec, staged_qspec, manifest)
         write_adjusted_visual_requirements(visual_requirements, staged_visual, manifest)
         render_bindings = _stage_binding_assets(manifest, staged_assets)
@@ -161,6 +171,7 @@ def bind_prompt_images(
         )
         spec = load_spec(staged_qspec)
         finalize_pipeline(
+            ai_paper_path=staged_ai_paper,
             qspec_path=staged_qspec,
             pdf_path=staging / "answercard.pdf",
             pages_dir=staging / "pages",

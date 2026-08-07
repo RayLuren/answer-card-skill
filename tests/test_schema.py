@@ -266,7 +266,7 @@ def test_validate_spec_rejects_wrong_schema_version() -> None:
     data = valid_spec_data()
     data["schema_version"] = 2
 
-    with pytest.raises(ValueError, match="schema_version must be 1"):
+    with pytest.raises(ValueError, match="stable qNNN machine key"):
         validate_spec(data)
 
 
