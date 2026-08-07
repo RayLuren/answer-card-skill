@@ -38,16 +38,12 @@ _VISUAL_TYPE_LABELS = {
     "uncertain": "待确认",
 }
 _STAGE_LABELS = {
+    "render_source_pages": "渲染整卷视觉证据",
+    "validate_ai_paper_spec": "校验整卷视觉 AI 结果",
+    "require_ready_ai_paper": "确认人工复核已关闭",
+    "ai_paper_to_qspec": "生成并校验 qspec v2",
     "ai_layout_judgment": "AI 版面判断",
     "ai_layout_validation": "AI 布局校验",
-    "extract_outline": "提取无答案结构",
-    "read_outline_summary": "读取结构摘要",
-    "require_ai_layout": "检查 AI 布局文件",
-    "audit_ai_layout_handoff": "审计 AI 布局与 outline",
-    "reject_ai_layout_conflicts": "阻止结构冲突继续构建",
-    "validate_ai_layout": "校验 AI 布局结构",
-    "prepare_ai_layout_skeleton": "生成无猜测 AI 布局骨架",
-    "ai_layout_to_qspec": "生成并校验 qspec",
     "build_answer_card": "生成 LaTeX、编译 PDF 与页框对齐",
     "build_alignment_retry": "页框对齐重试",
     "render_pdf_pages": "渲染页面预览",
@@ -140,6 +136,7 @@ def render_task_report(
                 f"| 正文页数 | {_display_value(result.get('expected_body_pages'))} |",
                 f"| 首页页数 | {_display_value(result.get('front_pages'))} |",
                 f"| 印刷赋分合计 | {_display_value(result.get('printed_percent_total'))}% |",
+                f"| 派生赋分合计 | {_display_value(result.get('derived_percent_total'))}% |",
                 f"| PDF 总页数 | {_display_value(result.get('final_pdf_pages'))} |",
                 f"| 预览页数 | {_display_value(result.get('preview_count'))} |",
                 f"| 最终顶部差异 | {_format_mm(result.get('top_spread_mm'))} |",
@@ -147,7 +144,7 @@ def render_task_report(
                 "",
                 *_alignment_failure_lines(report, result),
                 "",
-                "### AI 布局结构复核与保守回退",
+                "### 整卷视觉 AI 审计与保守回退",
                 "",
                 *_ai_layout_audit_lines(result),
                 "",
@@ -232,10 +229,10 @@ def _quick_overview_lines(reports: list[dict[str, Any]]) -> list[str]:
             visual_rows.append(
                 (
                     label,
-                    pending_ids,
-                    approved_ids,
-                    failed_ids,
-                    uncertain_ids,
+                    _visual_item_labels(preprinted, pending_ids),
+                    _visual_item_labels(preprinted, approved_ids),
+                    _visual_item_labels(preprinted, failed_ids),
+                    _visual_item_labels(uncertain, uncertain_ids),
                     "配图绑定失败" if _binding_failed(report) else _status_label(report.get("status")),
                 )
             )
@@ -361,6 +358,17 @@ def _visual_item_ids(items: list[object]) -> list[str]:
     return ids
 
 
+def _visual_item_labels(items: list[object], item_ids: list[str]) -> list[str]:
+    labels: dict[str, str] = {}
+    for item in items:
+        if not isinstance(item, dict) or item.get("id") is None:
+            continue
+        machine_id = str(item["id"])
+        display_id = str(item.get("display_id") or machine_id)
+        labels[machine_id] = display_id
+    return [labels.get(item_id, item_id) for item_id in item_ids]
+
+
 def _format_id_summary(item_ids: list[str]) -> str:
     if not item_ids:
         return "—"
@@ -418,81 +426,53 @@ def _alignment_failure_lines(
 
 
 def _ai_layout_audit_lines(result: dict[str, Any]) -> list[str]:
-    lines: list[str] = []
-    conflicts = result.get("ai_layout_conflicts")
-    if not isinstance(conflicts, list):
-        lines.append(
-            "> AI 布局与 outline 的结构冲突明细未写入管线报告，必须人工复核。"
-        )
-    elif not conflicts:
-        lines.append("- 未检测到 AI 布局与 outline 的结构冲突。")
-    else:
-        lines.extend(
-            [
-                f"> **检测到 {len(conflicts)} 项 AI 布局与前期结构文件冲突；本卷不得静默继续构建。**",
-                "",
-                "| 冲突类型 | 大题 | outline/期望值 | AI/实际值 |",
-                "| --- | --- | --- | --- |",
-            ]
-        )
-        for conflict in conflicts:
-            lines.append(_ai_layout_conflict_row(conflict))
-
-    percent_total = result.get("printed_percent_total")
-    if _is_number(percent_total):
-        if int(percent_total) == 100:
-            lines.append("- 印刷百分比合计为 100%。")
-        else:
-            lines.append(
+    if "ai_layout_conflicts" in result:
+        conflicts = result.get("ai_layout_conflicts")
+        legacy: list[str] = []
+        if isinstance(conflicts, list) and not conflicts:
+            legacy.append("- 未检测到 AI 布局与 outline 的结构冲突。")
+        elif isinstance(conflicts, list):
+            legacy.append(
+                f"> **检测到 {len(conflicts)} 项 AI 布局与前期结构文件冲突；本卷不得静默继续构建。**"
+            )
+            for conflict in conflicts:
+                legacy.append(_ai_layout_conflict_row(conflict))
+        percent_total = result.get("printed_percent_total")
+        if _is_number(percent_total) and int(percent_total) != 100:
+            legacy.append(
                 f"> **印刷百分比合计为 {int(percent_total)}%，不是 100%；已原样保留并列入异常汇报。**"
             )
-    else:
-        lines.append("> 印刷百分比合计无法确定，必须人工复核。")
-
-    fallback_items = result.get("fallback_layout_items")
-    reinspection_items = result.get("reinspection_required_items")
-    invalid_fallback_items = result.get("invalid_fallback_items")
-    if isinstance(reinspection_items, list) and reinspection_items:
-        item_ids = "、".join(
-            _escape_cell(item.get("id", "未记录"))
-            for item in reinspection_items
-            if isinstance(item, dict)
-        )
-        lines.append(
-            f"> **以下题号首次判断仍为 unknown，尚未完成规定的第二次视觉判断：{item_ids or '未记录'}。该卷不得继续构建。**"
-        )
-    elif not isinstance(reinspection_items, list):
-        lines.append("> 首次 unknown 的复判状态未写入管线报告，必须人工复核。")
-    if isinstance(invalid_fallback_items, list) and invalid_fallback_items:
-        details = "、".join(
-            f"{_escape_cell(item.get('id', '未记录'))}（{_escape_cell(item.get('height', '未记录'))}）"
-            for item in invalid_fallback_items
-            if isinstance(item, dict)
-        )
-        lines.append(
-            f"> **以下 unknown 项虽标记已复判，但未使用规定的 95mm 保守高度：{details or '未记录'}。该卷不得继续构建。**"
-        )
-    elif not isinstance(invalid_fallback_items, list):
-        lines.append("> unknown 回退字段合法性明细未写入管线报告，必须人工复核。")
-    if not isinstance(fallback_items, list):
-        lines.append("> 题型复判回退明细未写入管线报告，必须人工复核。")
-    elif not fallback_items:
-        lines.append("- 没有题目使用 `unknown` 长框回退。")
-    else:
-        lines.extend(
-            [
-                f"> **有 {len(fallback_items)} 个题框在第二次视觉判断后仍无法确定题型，已使用保守长框；交付前必须重点检查。**",
-                "",
-                "| 题号 | 保守留框高度 | 状态 |",
-                "| --- | ---: | --- |",
-            ]
-        )
-        for item in fallback_items:
-            item_id = item.get("id", "未记录") if isinstance(item, dict) else "未记录"
-            height = item.get("height", "未记录") if isinstance(item, dict) else "未记录"
-            lines.append(
-                f"| {_escape_cell(item_id)} | {_escape_cell(height)} | 二次视觉判断后仍为 unknown |"
+        fallback = result.get("fallback_layout_items")
+        if isinstance(fallback, list) and fallback:
+            ids = "、".join(
+                _escape_cell(item.get("id", "未记录"))
+                for item in fallback if isinstance(item, dict)
             )
+            legacy.append(
+                f"> **旧版题号 {ids} 在二次视觉判断后仍为 unknown，已使用 95mm 保守回退。**"
+            )
+        elif isinstance(fallback, list):
+            legacy.append("- 没有题目使用 `unknown` 长框回退。")
+        return legacy
+    lines = [
+        f"- AI 输出状态：{_escape_cell(result.get('ai_paper_status', '未记录'))}。",
+        f"- 人工确认轮次：{_display_value(result.get('human_confirmation_rounds'))}。",
+        f"- AI revision / attempt：{_display_value(result.get('ai_revision'))} / {_display_value(result.get('ai_attempt'))}。",
+        f"- AI 自报实际总分：{_display_value(result.get('actual_total_score'))}。",
+        f"- 印刷占比合计：{_display_value(result.get('printed_percent_total'))}%。",
+        f"- 派生占比合计：{_display_value(result.get('derived_percent_total'))}%。",
+    ]
+    fallback_ids = result.get("unknown_fallback_item_ids")
+    if isinstance(fallback_ids, list) and fallback_ids:
+        lines.append(
+            "> **以下机器题块在二次视觉检查后仍使用 unknown/95mm 保守回退："
+            + "、".join(_escape_cell(item) for item in fallback_ids)
+            + "。**"
+        )
+    elif isinstance(fallback_ids, list):
+        lines.append("- 没有题块使用 `unknown/95mm` 保守回退。")
+    else:
+        lines.append("> unknown/95mm 回退清单未记录，必须人工复核。")
     return lines
 
 
@@ -543,6 +523,12 @@ def _visual_requirement_lines(result: dict[str, Any]) -> list[str]:
             "> 配图明细未写入管线报告，必须人工复核；不能据此认定本卷不需要预置图。"
         ]
 
+    display_ids = {
+        str(item["id"]): str(item.get("display_id") or item["id"])
+        for item in [*preprinted, *uncertain]
+        if isinstance(item, dict) and item.get("id") is not None
+    }
+
     lines = [
         f"- 必须预置图的小题：{len(preprinted)} 个。",
         f"- 待视觉复核的小题：{len(uncertain)} 个。",
@@ -573,7 +559,7 @@ def _visual_requirement_lines(result: dict[str, Any]) -> list[str]:
             [
                 status_line,
                 "",
-                "| 题号 | 分类 | 图形类型 | 当前处理 |",
+                "| 显示题号 | 分类 | 图形类型 | 当前处理 |",
                 "| --- | --- | --- | --- |",
             ]
         )
@@ -619,7 +605,7 @@ def _visual_requirement_lines(result: dict[str, Any]) -> list[str]:
                 if not isinstance(item, dict):
                     continue
                 lines.append(
-                    f"| {_escape_cell(item.get('id', '未记录'))} | "
+                    f"| {_escape_cell(display_ids.get(str(item.get('id')), item.get('id', '未记录')))} | "
                     f"{_escape_cell(item.get('mode', '未记录'))} | "
                     f"{_display_value(item.get('repeat_count'))} | "
                     f"{_format_mm(item.get('gap_mm'))} |"
@@ -639,7 +625,7 @@ def _visual_requirement_lines(result: dict[str, Any]) -> list[str]:
                 if not isinstance(item, dict):
                     continue
                 lines.append(
-                    f"| {_escape_cell(item.get('id', '未记录'))} | "
+                    f"| {_escape_cell(display_ids.get(str(item.get('id')), item.get('id', '未记录')))} | "
                     f"{_escape_cell(item.get('from', '未记录'))} | "
                     f"{_escape_cell(item.get('to', '未记录'))} |"
                 )
@@ -680,7 +666,7 @@ def _binding_cancelled_ids(result: dict[str, Any]) -> set[str]:
 def _visual_item_row(item: object, handling: str) -> str:
     if not isinstance(item, dict):
         return f"| 未记录 | 未记录 | 未记录 | {handling} |"
-    item_id = _escape_cell(item.get("id", "未记录"))
+    display_id = _escape_cell(item.get("display_id", item.get("id", "未记录")))
     requirement = _VISUAL_REQUIREMENT_LABELS.get(
         str(item.get("visual_requirement")),
         str(item.get("visual_requirement") or "未记录"),
@@ -690,7 +676,7 @@ def _visual_item_row(item: object, handling: str) -> str:
         str(item.get("visual_type") or "未记录"),
     )
     return (
-        f"| {item_id} | {_escape_cell(requirement)} | {_escape_cell(visual_type)} | "
+        f"| {display_id} | {_escape_cell(requirement)} | {_escape_cell(visual_type)} | "
         f"{handling} |"
     )
 

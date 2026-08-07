@@ -9,7 +9,7 @@ from typing import Any, Final, Mapping
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
-from answercard.layout import plan_answer_pages, question_needspace
+from answercard.layout import PlannedPage, plan_answer_pages, question_needspace
 from answercard.schema import AnswerCardSpec, load_spec
 
 
@@ -37,6 +37,7 @@ _LATEX_ESCAPES: Final = {
 @dataclass(frozen=True)
 class ScoreTableQuestion:
     id: str
+    display_id: str
     raw_score: int | float
     assigned_score: int
 
@@ -58,6 +59,7 @@ def render_tex(
     page_height_adjustments_mm: list[float] | None = None,
     block_height_adjustments_mm: Mapping[str, float] | None = None,
     page_top_spacers_mm: list[float] | None = None,
+    planned_pages: list[PlannedPage] | None = None,
     image_bindings: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> Path:
     """Render a qspec.yaml file to a LaTeX document and return the output path."""
@@ -72,6 +74,7 @@ def render_tex(
         page_height_adjustments_mm=page_height_adjustments_mm,
         block_height_adjustments_mm=block_height_adjustments_mm,
         page_top_spacers_mm=page_top_spacers_mm,
+        planned_pages=planned_pages,
         front_page_asset_path=asset_path,
         image_bindings=image_bindings,
     )
@@ -101,12 +104,13 @@ def render_spec(
     page_height_adjustments_mm: list[float] | None = None,
     block_height_adjustments_mm: Mapping[str, float] | None = None,
     page_top_spacers_mm: list[float] | None = None,
+    planned_pages: list[PlannedPage] | None = None,
     front_page_asset_path: str = "../assets/periodic-table.png",
     image_bindings: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> str:
     """Render an already validated spec object to LaTeX."""
 
-    pages = plan_answer_pages(
+    pages = planned_pages if planned_pages is not None else plan_answer_pages(
         spec,
         page_height_adjustments_mm=page_height_adjustments_mm,
         block_height_adjustments_mm=block_height_adjustments_mm,
@@ -146,6 +150,7 @@ def build_score_table(spec: AnswerCardSpec) -> ScoreTableView:
     questions = tuple(
         ScoreTableQuestion(
             id=question.id,
+            display_id=question.display_id,
             raw_score=question.score,
             assigned_score=question.percent,
         )

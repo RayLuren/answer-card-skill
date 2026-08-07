@@ -14,14 +14,16 @@ def test_skill_requires_fresh_whole_paper_bounded_orchestration() -> None:
         "fresh-context",
         "whole paper",
         "bounded concurrency",
-        "ai_layout.attempt-n.json",
-        "accept-ai-layout",
+        "allowed_output_path",
+        "accept-ai-paper",
+        "confirm-ai-paper",
         "exactly once",
     ):
         assert phrase in combined
     assert "槽位不足时" in reference
     assert "构建始终串行" in reference
     assert "does not count as the whole-paper retry" in skill
+    assert "never run pdf text extraction, ocr" in skill.lower()
     assert "references/codex-batch-orchestration.md" in skill
 
 

@@ -11,14 +11,19 @@ from answercard.visual_requirements import export_visual_requirements
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Export answer-free visual requirement decisions from validated AI layout JSON."
+        description="Export answer-free visual decisions from a ready ai_paper_spec.json."
     )
-    parser.add_argument("ai_layout_path", type=Path)
+    parser.add_argument("ai_paper_path", type=Path)
     parser.add_argument("output_path", type=Path)
+    parser.add_argument("--page-count", type=int, required=True)
     args = parser.parse_args(argv)
 
     try:
-        output_path = export_visual_requirements(args.ai_layout_path, args.output_path)
+        output_path = export_visual_requirements(
+            args.ai_paper_path,
+            args.output_path,
+            page_count=args.page_count,
+        )
     except (OSError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

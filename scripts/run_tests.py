@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import os
 from uuid import uuid4
 
 
@@ -27,7 +28,13 @@ def main() -> int:
     returncode = 1
     cleanup_error: OSError | None = None
     try:
-        result = subprocess.run(command, cwd=PROJECT_ROOT, check=False)
+        environment = os.environ.copy()
+        existing_pythonpath = environment.get("PYTHONPATH")
+        environment["PYTHONPATH"] = str(PROJECT_ROOT / "src") + (
+            os.pathsep + existing_pythonpath if existing_pythonpath else ""
+        )
+        environment["PYTHONUTF8"] = "1"
+        result = subprocess.run(command, cwd=PROJECT_ROOT, check=False, env=environment)
         returncode = result.returncode
     finally:
         try:

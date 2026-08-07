@@ -1,4 +1,4 @@
-"""Answer-free visual-requirement manifests derived from validated AI layout data."""
+"""Answer-free visual requirement manifests for legacy and qspec-v2 paths."""
 
 from __future__ import annotations
 
@@ -6,24 +6,30 @@ import json
 from pathlib import Path
 from typing import Any, Iterable
 
-from answercard.ai_layout_schema import (
+from answercard.ai_paper_schema import (
     ALLOWED_VISUAL_REQUIREMENTS,
     ALLOWED_VISUAL_TYPES,
     PREPRINTED_VISUAL_REQUIREMENTS,
-    load_ai_layout,
 )
+from answercard.ai_paper_schema import READY, load_ai_paper_spec
 
 
-CURRENT_VISUAL_REQUIREMENTS_SCHEMA_VERSION = 1
+CURRENT_VISUAL_REQUIREMENTS_SCHEMA_VERSION = 2
+SUPPORTED_VISUAL_REQUIREMENTS_SCHEMA_VERSIONS = {1, 2}
 
 
 def export_visual_requirements(
-    ai_layout_path: str | Path,
+    source_path: str | Path,
     output_path: str | Path,
+    *,
+    page_count: int | None = None,
 ) -> Path:
-    """Validate AI layout data and write its structure-only visual decisions."""
+    """Write visual decisions from ai_paper_spec (v2) or legacy ai_layout (v1)."""
 
-    manifest = build_visual_requirements(load_ai_layout(ai_layout_path))
+    if page_count is None:
+        raise ValueError("page_count is required for ai_paper_spec visual export")
+    source = load_ai_paper_spec(source_path, page_count=page_count)
+    manifest = build_visual_requirements(source)
     destination = Path(output_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(
@@ -34,29 +40,29 @@ def export_visual_requirements(
     return destination
 
 
-def build_visual_requirements(ai_layout: dict[str, Any]) -> dict[str, Any]:
-    """Project visual fields from already validated AI layout data."""
-
-    questions: list[dict[str, Any]] = []
-    for question in ai_layout["questions"]:
-        items = []
-        for item in question["items"]:
-            requirement = item["visual_requirement"]
-            items.append(
-                {
-                    "id": item["id"],
-                    "visual_requirement": requirement,
-                    "visual_type": item["visual_type"],
-                    "requires_preprinted_visual": _preprinted_value(requirement),
-                }
+def build_visual_requirements(source: dict[str, Any]) -> dict[str, Any]:
+    if source.get("status") == READY:
+        questions: list[dict[str, Any]] = []
+        for question_index, question in enumerate(source["questions"], start=1):
+            question_id = f"q{question_index:03d}"
+            items = []
+            for item_index, item in enumerate(question["items"], start=1):
+                requirement = item["visual_requirement"]
+                items.append(
+                    {
+                        "item_id": f"{question_id}-i{item_index:03d}",
+                        "display_id": item["number"],
+                        "visual_requirement": requirement,
+                        "visual_type": item["visual_type"],
+                        "requires_preprinted_visual": _preprinted_value(requirement),
+                    }
+                )
+            questions.append(
+                {"question_id": question_id, "display_id": question["number"], "items": items}
             )
-        questions.append({"id": question["id"], "items": items})
+        return validate_visual_requirements({"schema_version": 2, "questions": questions})
 
-    manifest = {
-        "schema_version": CURRENT_VISUAL_REQUIREMENTS_SCHEMA_VERSION,
-        "questions": questions,
-    }
-    return validate_visual_requirements(manifest)
+    raise ValueError("visual requirements may be exported only from status ready ai_paper_spec")
 
 
 def load_visual_requirements(
@@ -64,8 +70,7 @@ def load_visual_requirements(
     *,
     expected_item_ids: Iterable[str] | None = None,
 ) -> dict[str, Any]:
-    with Path(path).open("r", encoding="utf-8") as manifest_file:
-        data = json.load(manifest_file)
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
     return validate_visual_requirements(data, expected_item_ids=expected_item_ids)
 
 
@@ -76,13 +81,10 @@ def validate_visual_requirements(
 ) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError("visual requirements must be a JSON object")
-    _reject_unknown_fields(data, {"schema_version", "questions"}, "visual_requirements")
-    if data.get("schema_version") != CURRENT_VISUAL_REQUIREMENTS_SCHEMA_VERSION:
-        raise ValueError(
-            "visual_requirements.schema_version must be "
-            f"{CURRENT_VISUAL_REQUIREMENTS_SCHEMA_VERSION}"
-        )
-
+    _reject_unknown(data, {"schema_version", "questions"}, "visual_requirements")
+    version = data.get("schema_version")
+    if version not in SUPPORTED_VISUAL_REQUIREMENTS_SCHEMA_VERSIONS:
+        raise ValueError("visual_requirements.schema_version must be 1 or 2")
     questions = data.get("questions")
     if not isinstance(questions, list) or not questions:
         raise ValueError("visual_requirements.questions must be a non-empty list")
@@ -93,10 +95,15 @@ def validate_visual_requirements(
         context = f"questions[{question_index}]"
         if not isinstance(question, dict):
             raise ValueError(f"{context} must be an object")
-        _reject_unknown_fields(question, {"id", "items"}, context)
-        question_id = _required_str(question, "id", context)
+        if version == 1:
+            _reject_unknown(question, {"id", "items"}, context)
+            question_id = _required_str(question, "id", context)
+        else:
+            _reject_unknown(question, {"question_id", "display_id", "items"}, context)
+            question_id = _required_str(question, "question_id", context)
+            _required_str(question, "display_id", context)
         if question_id in seen_questions:
-            raise ValueError(f"{context}.id duplicates {question_id}")
+            raise ValueError(f"{context} machine id duplicates {question_id}")
         seen_questions.add(question_id)
         items = question.get("items")
         if not isinstance(items, list):
@@ -105,50 +112,43 @@ def validate_visual_requirements(
             item_context = f"{context}.items[{item_index}]"
             if not isinstance(item, dict):
                 raise ValueError(f"{item_context} must be an object")
-            _reject_unknown_fields(
-                item,
-                {
-                    "id",
-                    "visual_requirement",
-                    "visual_type",
-                    "requires_preprinted_visual",
-                },
-                item_context,
-            )
-            item_id = _required_str(item, "id", item_context)
+            common = {"visual_requirement", "visual_type", "requires_preprinted_visual"}
+            if version == 1:
+                _reject_unknown(item, common | {"id"}, item_context)
+                item_id = _required_str(item, "id", item_context)
+            else:
+                _reject_unknown(item, common | {"item_id", "display_id"}, item_context)
+                item_id = _required_str(item, "item_id", item_context)
+                _required_str(item, "display_id", item_context)
             if item_id in seen_items:
-                raise ValueError(f"{item_context}.id duplicates {item_id}")
+                raise ValueError(f"{item_context} machine id duplicates {item_id}")
             seen_items.add(item_id)
             if item_id != question_id and not item_id.startswith(f"{question_id}-"):
-                raise ValueError(f"{item_context}.id must belong to question {question_id}")
-
+                raise ValueError(f"{item_context} machine id must belong to {question_id}")
             requirement = _required_str(item, "visual_requirement", item_context)
             if requirement not in ALLOWED_VISUAL_REQUIREMENTS:
-                raise ValueError(f"{item_context}.visual_requirement must be an allowed visual requirement")
+                raise ValueError(f"{item_context}.visual_requirement is invalid")
             visual_type = _required_str(item, "visual_type", item_context)
             if visual_type not in ALLOWED_VISUAL_TYPES:
-                raise ValueError(f"{item_context}.visual_type must be an allowed visual type")
+                raise ValueError(f"{item_context}.visual_type is invalid")
             _validate_visual_combination(requirement, visual_type, context=item_context)
-
-            expected_preprinted = _preprinted_value(requirement)
-            if item.get("requires_preprinted_visual") is not expected_preprinted:
-                raise ValueError(
-                    f"{item_context}.requires_preprinted_visual is inconsistent with visual_requirement"
-                )
-
+            if item.get("requires_preprinted_visual") is not _preprinted_value(requirement):
+                raise ValueError(f"{item_context}.requires_preprinted_visual is inconsistent")
     if expected_item_ids is not None:
         expected = {str(item_id) for item_id in expected_item_ids}
         missing = sorted(expected - seen_items)
         extra = sorted(seen_items - expected)
         if missing or extra:
-            details = []
-            if missing:
-                details.append("missing: " + ", ".join(missing))
-            if extra:
-                details.append("extra: " + ", ".join(extra))
-            raise ValueError("visual requirements item coverage mismatch (" + "; ".join(details) + ")")
-
+            raise ValueError(f"visual requirements item coverage mismatch (missing={missing}; extra={extra})")
     return data
+
+
+def visual_item_machine_id(item: dict[str, Any]) -> str:
+    return str(item.get("item_id", item.get("id")))
+
+
+def visual_item_display_id(item: dict[str, Any]) -> str:
+    return str(item.get("display_id", visual_item_machine_id(item)))
 
 
 def visual_requirement_counts(data: dict[str, Any]) -> dict[str, int]:
@@ -160,14 +160,13 @@ def visual_requirement_counts(data: dict[str, Any]) -> dict[str, int]:
 
 
 def visual_requirement_report_data(data: dict[str, Any]) -> dict[str, Any]:
-    """Return answer-free item details required by the user-facing task report."""
-
     preprinted_items: list[dict[str, Any]] = []
     uncertain_items: list[dict[str, Any]] = []
     for question in data["questions"]:
         for item in question["items"]:
             entry = {
-                "id": item["id"],
+                "id": visual_item_machine_id(item),
+                "display_id": visual_item_display_id(item),
                 "visual_requirement": item["visual_requirement"],
                 "visual_type": item["visual_type"],
             }
@@ -175,17 +174,13 @@ def visual_requirement_report_data(data: dict[str, Any]) -> dict[str, Any]:
                 preprinted_items.append(entry)
             elif item["visual_requirement"] == "uncertain":
                 uncertain_items.append(entry)
-
-    if preprinted_items:
-        asset_status = "awaiting_manual_assets"
-    elif uncertain_items:
-        asset_status = "visual_review_required"
-    else:
-        asset_status = "not_required"
+    status = "awaiting_manual_assets" if preprinted_items else (
+        "visual_review_required" if uncertain_items else "not_required"
+    )
     return {
         "preprinted_visual_items": preprinted_items,
         "uncertain_visual_items": uncertain_items,
-        "visual_asset_status": asset_status,
+        "visual_asset_status": status,
     }
 
 
@@ -197,16 +192,14 @@ def _preprinted_value(requirement: str) -> bool | None:
 
 def _validate_visual_combination(requirement: str, visual_type: str, *, context: str) -> None:
     if requirement == "no_visual" and visual_type != "none":
-        raise ValueError(f'{context}.visual_type must be "none" when visual_requirement is "no_visual"')
+        raise ValueError(f'{context}.visual_type must be "none" for no_visual')
     if requirement == "uncertain" and visual_type != "uncertain":
-        raise ValueError(f'{context}.visual_type must be "uncertain" when visual_requirement is "uncertain"')
+        raise ValueError(f'{context}.visual_type must be "uncertain" for uncertain')
     if requirement not in {"no_visual", "uncertain"} and visual_type in {"none", "uncertain"}:
-        raise ValueError(
-            f"{context}.visual_type must identify the visual when visual_requirement is {requirement}"
-        )
+        raise ValueError(f"{context}.visual_type must identify the visual")
 
 
-def _reject_unknown_fields(data: dict[str, Any], allowed: set[str], context: str) -> None:
+def _reject_unknown(data: dict[str, Any], allowed: set[str], context: str) -> None:
     unknown = sorted(set(data) - allowed)
     if unknown:
         raise ValueError(f"{context} contains unknown field(s): {', '.join(unknown)}")

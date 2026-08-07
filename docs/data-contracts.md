@@ -1,136 +1,115 @@
-# 数据契约
+# v0.4.0 数据契约
 
-[返回文档导航](README.md)
+## `ai_paper_job.revision-R.attempt-N.json`
 
-本项目通过严格的 JSON/YAML 中间层将参考 PDF 检查、AI 判断和确定性渲染分开。所有契约只允许答案无关的结构元数据；未知字段默认拒绝，而不是忽略。
+Job schema version 为 2，只允许：
 
-## `outline.json`
+- `batch_id`、`paper_id`
+- `attempt`：当前 revision 内只能为 1 或 2
+- `revision`：0 为首次视觉检查，人工确认后从 1 递增
+- 固定 `prompt_path`
+- 不可变 `source_pdf`、`source_pages_dir`、`page_count`
+- `human_confirmation_path`：revision 0 必须为 null
+- 唯一 `allowed_output_path`
 
-结构提取器只允许写入：
+Job 不得包含 outline、skeleton、OCR 文本、页面文字、候选题号或上一 attempt 的结构结论。
 
-- `source`
-- `questions[].id`
-- `questions[].title`
-- `questions[].score`
-- `questions[].page`
-- `questions[].items[].id`
-- `questions[].items[].page`
+## `ai_paper_spec.json`
 
-`questions[].score` 是大题分值。小题分值、答案正文、题型、答题块类型和高度都不属于 outline。
+正式 schema version 为 1。顶层只允许 `schema_version`、`status`、`questions` 和 `review_items`。
 
-提取器必须过滤科学计数法等上下文中的伪小题号，例如 `× 10-4` 和 `10-12.67`。
+### `status: ready`
 
-层级题号只保留实际叶子 item。若同一大题中同时出现 `6-3`、`6-3-1` 和 `6-3-2`，outline 只保留 `6-3-1`、`6-3-2`；父级 `6-3` 视为分组号，不生成独立答题块。skeleton、AI layout 和 qspec schema 均必须拒绝父级 ID 与其任一后代 ID 共存，以拦截旧产物或手写数据中的结构冲突。
+`questions` 必须非空，`review_items` 必须为空。每题包含：
 
-## `ai_layout.skeleton.json`
+- `number`：AI 归一化的显示题号；脚本不检查重复、连续、顺序或层级合理性。
+- `title`：安全简短印刷标题，无法安全确认时用 `第{number}题`。
+- `score`：正数大题总分。
+- `percent`：1 至 100 的整数。
+- `percent_source`：`printed` 或 `derived`。
+- `source_page`：1 至 job `page_count`。
+- `items`：至少一个答题块。
 
-skeleton 由 outline 确定性生成，只锁定 question id、item id、顺序和分值。它不能预填或暗示 `kind`、`height`、百分比和视觉分类。
+每个 item 包含 `number`、`source_page`、`kind`、`height`、`fallback_after_reinspection`、`visual_requirement` 和 `visual_type`。
 
-视觉 Agent 只能填充空的决策槽位，不能改变 skeleton 结构。
+题型和高度范围：
 
-## `ai_layout.json`
+| kind | mm |
+| --- | ---: |
+| formula | 16–28 |
+| short_answer | 20–34 |
+| equation | 24–44 |
+| calculation | 38–80 |
+| drawing | 34–80 |
+| mechanism | 55–105 |
+| table | 34–80 |
+| multi_step | 45–95 |
+| long_explanation | 50–100 |
+| mixed | 45–95 |
 
-每个 question 必须显式包含：
+`unknown` 只能使用 `95mm` 且 fallback 必须为 true。其他题型 fallback 必须为 false。
 
-- `id`
-- 从题目标题视觉读取的 `score`
-- `percent`
-- `percent_source`
-- 非空的 items
+脚本递归拒绝答案、解答、推理、方程/结构正文、摘录、匹配文字、关键词、原因、证据、描述、notes 和 confidence 字段。印刷占比合计不为 100 只记录，不阻断。derived 值由 AI 提供，脚本不重新分配。
 
-`percent_source` 必须是契约允许的来源。标题中存在可见百分比时使用 `printed` 并原样保留，即使总和不是 100。标题确实没有百分比时，才根据所有大题分值使用确定性的最大余数法分配并标记为 `derived`；报告必须列出派生项，不能将其描述为印刷值。
+### `status: needs_human_review`
 
-每个 item 使用固定字段，包括：
+`questions` 必须为空。每个 review item 只允许：
 
-- `id`
-- `kind`
-- 带单位的正 `height`
-- `fallback_after_reinspection`
-- `visual_requirement`
-- `visual_type`
+- `review_id`：`r001` 形式
+- `page`
+- `region`：`top`、`upper_middle`、`middle`、`lower_middle`、`bottom`
+- `target`：`question_number`、`question_score`、`question_percent`、`item_number`
+- `question_index`
+- `item_index`：可为 null
+- `candidates`：非空字符串列表
 
-允许的布局 kind：
+不得加入自由原因、摘录或视觉描述。
 
-- `short`
-- `medium`
-- `long`
-- `derivation`
-- `table`
-- `drawing`
-- `mixed`
-- `unknown`，仅限一次显式复查后仍无法判断
+## `human_confirmation.revision-R.json`
 
-不同 kind 的高度必须落在固定 prompt 规定的正值范围内。`unknown` 只能与 `95mm` 和 `fallback_after_reinspection: true` 组合；qspec 转换时渲染为 `mixed` 95mm，但报告必须保留并突出原 fallback。
+只允许 `schema_version`、`paper_id`、`revision` 和 `decisions`。每项 decision 只有 `review_id` 和非空 `value`。review id 必须与当前请求精确一一覆盖，不允许补充未请求字段。
 
-固定视觉需求分类：
+确认不会直接生成 qspec。它只创建新的视觉 job；新上下文必须读取整卷页面并输出完整 `ready` 结果。
 
-- `modify_existing_visual`
-- `complete_existing_visual`
-- `draw_on_scaffold`
-- `draw_from_scratch`
-- `visual_reference_only`
-- `no_visual`
-- `uncertain`
+## qspec v2
 
-只有前三类派生为需要预印题面图形。`uncertain` 的派生结果为 `null`，等待后续复核。
+v2 新增显示题号：
 
-`visual_type` 使用固定枚举，覆盖化学结构、示意图、坐标系、表格、网格、反应框架、流程图、仪器装置、其他、无和不确定。
+```yaml
+schema_version: 2
+questions:
+  - id: q001
+    display_id: "9"
+    title: 第9题
+    score: 12
+    percent: 10
+    blocks:
+      - id: q001-i001
+        display_id: "9-2-1"
+        kind: short_answer
+        height: 24mm
+```
 
-禁止加入自由文本证据、`review_notes`、匹配文字、关键词、摘录、理由、数值置信度、方程、答案或化学结构。
+机器键由数组位置生成并必须唯一。渲染只打印 `display_id`，分页、页框对齐、配图绑定和审计关联使用机器键。schema 不检查显示题号重复、父子并存、连续性、数字排序或是否以大题号开头。
 
-### id 覆盖规则
-
-AI layout 必须精确覆盖 outline 中所有 item id。没有印刷小题号且只有一个完整答题区的大题，可以使用大题 id 本身作为唯一 block id，例如 `2`，不能虚构 `2-1`。
-
-视觉证据显示存在遗漏的印刷小题号时，应停止并修正 outline，不能在 AI layout 中创建 `question-*` 或其他合成 id。
+旧 qspec v1 仍可读取，其 `id` 同时作为机器键和显示题号。
 
 ## `visual_requirements.json`
 
-该文件由经验证的 AI layout 确定性导出，包含：
+v2 每题包含 `question_id`、`display_id` 和 `items`；每项包含：
 
-- question/item id
-- 固定 `visual_requirement`
-- 固定 `visual_type`
-- 派生 `requires_preprinted_visual`
+```json
+{
+  "item_id": "q003-i002",
+  "display_id": "9-2-1",
+  "visual_requirement": "draw_on_scaffold",
+  "visual_type": "coordinate_system",
+  "requires_preprinted_visual": true
+}
+```
 
-它是答案无关的结构 manifest，不保存原因、图形描述、OCR 文本、置信度或答案内容。其 item 覆盖必须与最终 qspec block 完全一致。
+绑定 manifest 使用机器 `item_id`，用户报告优先显示 `display_id` 并附机器键。旧 visual manifest v1 仍可读取。
 
-配图状态保持在 qspec v1 之外。
+## 报告字段
 
-## qspec v1
-
-顶层字段：
-
-- `schema_version: 1`
-- `paper`
-- `style`
-- 非空 `questions`
-
-主要对象为 `PaperSpec`、`StyleSpec`、`QuestionSpec`、`BlockSpec` 和 `AnswerCardSpec`。`load_spec(path)` 读取 YAML 后必须先调用 `validate_spec(data)`。
-
-`paper` 包含正式标题、是否省略首页和总分。标题必须由流水线显式输入，不能从参考答案文件名或 `outline.source` 推断。`paper.total_score` 必须等于所有大题分值之和。
-
-每个 question 需要唯一正整数形式的 `id`、`title`、正 `score`、整数 `percent` 和非空 blocks。
-
-block 只允许：
-
-- `id`
-- AI 批准的 `kind`
-- 带 `mm` 或 `pt` 的正 `height`
-- 可选 `force_page_break_before`
-
-自由文本 `raw_heading`、`note`，拼错的 `hight`，缺少高度，未知 kind，重复或归属错误的 id，以及未知字段都必须失败。
-
-## 报告契约
-
-`pipeline_report.json` 只能记录路径、状态、阶段耗时、页数、预览数量、测量值、固定警告、结构冲突、百分比总和、fallback id 和配图 item id。
-
-其 `result.alignment_history` 每项只包含：
-
-- `pass`
-- `top_spread_mm`
-- `bottom_spread_mm`
-- `tolerance_mm`
-- `passed`
-
-成功和失败都必须保留该无答案历史。完整报告行为见[验收与报告](validation-and-reporting.md)。
+`pipeline_report.json` 记录 AI status、attempt、revision、人工确认轮次、来源 PDF SHA-256、来源页数、实际总分、printed/derived 占比合计、unknown/95mm 机器题块、配图清单、页数、页框对齐 history 和最终验收结果。它不裁决 AI 题号是否正确。

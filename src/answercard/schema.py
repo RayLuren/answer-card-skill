@@ -10,23 +10,26 @@ from typing import Any
 
 import yaml
 
-from answercard.ai_layout_schema import RESOLVED_KINDS
+from answercard.ai_paper_schema import RESOLVED_KINDS
 from answercard.item_id_hierarchy import first_parent_descendant_pair
 
 
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
+SUPPORTED_SCHEMA_VERSIONS = {1, 2}
 FORBIDDEN_PAPER_TITLE_TERMS = ("参考答案", "答案及评分标准")
 
 _DIMENSION_RE = re.compile(r"^(?P<value>(?:0|[1-9]\d*)(?:\.\d+)?)(?P<unit>mm|pt)$")
 _QUESTION_ID_RE = re.compile(r"^[1-9]\d*$")
 _BLOCK_ID_RE = re.compile(r"^[1-9]\d*(?:-[1-9]\d*)*$")
+_V2_QUESTION_ID_RE = re.compile(r"^q\d{3,}$")
+_V2_BLOCK_ID_RE = re.compile(r"^q\d{3,}-i\d{3,}$")
 
 _SPEC_FIELDS = {"schema_version", "paper", "style", "questions"}
 _PAPER_FIELDS = {"title", "page_size", "omit_front_page", "total_score", "margin"}
 _MARGIN_FIELDS = {"top", "bottom", "left", "right"}
 _STYLE_FIELDS = {"label_width", "border_width", "box_gap", "title_gap"}
-_QUESTION_FIELDS = {"id", "title", "score", "percent", "blocks"}
-_BLOCK_FIELDS = {"id", "kind", "height", "force_page_break_before"}
+_QUESTION_FIELDS = {"id", "display_id", "title", "score", "percent", "blocks"}
+_BLOCK_FIELDS = {"id", "display_id", "kind", "height", "force_page_break_before"}
 
 
 @dataclass(frozen=True)
@@ -52,6 +55,11 @@ class BlockSpec:
     kind: str
     height: str
     force_page_break_before: bool = False
+    display_id: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.display_id:
+            object.__setattr__(self, "display_id", self.id)
 
 
 @dataclass(frozen=True)
@@ -61,6 +69,11 @@ class QuestionSpec:
     score: int | float
     blocks: list[BlockSpec]
     percent: int = 0
+    display_id: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.display_id:
+            object.__setattr__(self, "display_id", self.id)
 
 
 @dataclass(frozen=True)
@@ -87,9 +100,9 @@ def validate_spec(data: Any) -> AnswerCardSpec:
 
     _reject_unknown_fields(data, _SPEC_FIELDS, "spec")
     schema_version = _required_int(data, "schema_version", "spec")
-    if schema_version != CURRENT_SCHEMA_VERSION:
+    if schema_version not in SUPPORTED_SCHEMA_VERSIONS:
         raise ValueError(
-            f"spec.schema_version must be {CURRENT_SCHEMA_VERSION}, got {schema_version}"
+            f"spec.schema_version must be 1 or 2, got {schema_version}"
         )
 
     paper = _validate_paper(_required_mapping(data, "paper", "spec"))
@@ -97,7 +110,10 @@ def validate_spec(data: Any) -> AnswerCardSpec:
     questions_data = _required_list(data, "questions", "spec")
     if not questions_data:
         raise ValueError("spec.questions must be a non-empty list")
-    questions = [_validate_question(item, index) for index, item in enumerate(questions_data)]
+    questions = [
+        _validate_question(item, index, schema_version=schema_version)
+        for index, item in enumerate(questions_data)
+    ]
     _validate_question_set(questions, paper.total_score)
 
     return AnswerCardSpec(
@@ -152,15 +168,23 @@ def _validate_style(data: dict[str, Any]) -> StyleSpec:
     )
 
 
-def _validate_question(data: Any, index: int) -> QuestionSpec:
+def _validate_question(data: Any, index: int, *, schema_version: int) -> QuestionSpec:
     context = f"questions[{index}]"
     if not isinstance(data, dict):
         raise ValueError(f"{context} must be a mapping")
     _reject_unknown_fields(data, _QUESTION_FIELDS, context)
 
     question_id = _required_str(data, "id", context)
-    if not _QUESTION_ID_RE.fullmatch(question_id):
-        raise ValueError(f"{context}.id must be a positive integer string")
+    if schema_version == 1:
+        if not _QUESTION_ID_RE.fullmatch(question_id):
+            raise ValueError(f"{context}.id must be a positive integer string")
+        if "display_id" in data:
+            raise ValueError(f"{context}.display_id is available only in qspec v2")
+        display_id = question_id
+    else:
+        if not _V2_QUESTION_ID_RE.fullmatch(question_id):
+            raise ValueError(f"{context}.id must be a stable qNNN machine key")
+        display_id = _required_str(data, "display_id", context)
 
     score = _required_number(data, "score", context)
     if score <= 0:
@@ -173,7 +197,10 @@ def _validate_question(data: Any, index: int) -> QuestionSpec:
     blocks_data = _required_list(data, "blocks", context)
     if not blocks_data:
         raise ValueError(f"{context}.blocks must be a non-empty list")
-    blocks = [_validate_block(item, index, block_index) for block_index, item in enumerate(blocks_data)]
+    blocks = [
+        _validate_block(item, index, block_index, schema_version=schema_version)
+        for block_index, item in enumerate(blocks_data)
+    ]
 
     seen_block_ids: set[str] = set()
     for block_index, block in enumerate(blocks):
@@ -187,12 +214,12 @@ def _validate_question(data: Any, index: int) -> QuestionSpec:
             raise ValueError(f"{block_context}.id duplicates {block.id}")
         seen_block_ids.add(block.id)
 
-    if len(blocks) > 1 and any(block.id == question_id for block in blocks):
+    if schema_version == 1 and len(blocks) > 1 and any(block.id == question_id for block in blocks):
         raise ValueError(
             f"{context}.blocks may use question id {question_id} only when the question has one block"
         )
 
-    parent_pair = first_parent_descendant_pair(block.id for block in blocks)
+    parent_pair = first_parent_descendant_pair(block.id for block in blocks) if schema_version == 1 else None
     if parent_pair is not None:
         parent_id, descendant_id = parent_pair
         raise ValueError(
@@ -205,18 +232,33 @@ def _validate_question(data: Any, index: int) -> QuestionSpec:
         score=score,
         blocks=blocks,
         percent=percent,
+        display_id=display_id,
     )
 
 
-def _validate_block(data: Any, question_index: int, block_index: int) -> BlockSpec:
+def _validate_block(
+    data: Any,
+    question_index: int,
+    block_index: int,
+    *,
+    schema_version: int,
+) -> BlockSpec:
     context = f"questions[{question_index}].blocks[{block_index}]"
     if not isinstance(data, dict):
         raise ValueError(f"{context} must be a mapping")
     _reject_unknown_fields(data, _BLOCK_FIELDS, context)
 
     block_id = _required_str(data, "id", context)
-    if not _BLOCK_ID_RE.fullmatch(block_id):
-        raise ValueError(f"{context}.id must be a positive integer or numeric parts separated by hyphens")
+    if schema_version == 1:
+        if not _BLOCK_ID_RE.fullmatch(block_id):
+            raise ValueError(f"{context}.id must be a positive integer or numeric parts separated by hyphens")
+        if "display_id" in data:
+            raise ValueError(f"{context}.display_id is available only in qspec v2")
+        display_id = block_id
+    else:
+        if not _V2_BLOCK_ID_RE.fullmatch(block_id):
+            raise ValueError(f"{context}.id must be a stable qNNN-iNNN machine key")
+        display_id = _required_str(data, "display_id", context)
 
     kind = _required_str(data, "kind", context)
     if kind not in RESOLVED_KINDS:
@@ -231,6 +273,7 @@ def _validate_block(data: Any, question_index: int, block_index: int) -> BlockSp
         kind=kind,
         height=_required_positive_dimension(data, "height", context),
         force_page_break_before=force_page_break_before,
+        display_id=display_id,
     )
 
 

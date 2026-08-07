@@ -1,74 +1,52 @@
 ---
 name: answer-card-skill
-description: Run Codex-managed directory batches that turn arbitrarily named reference-answer PDFs into blank, validated chemistry answer-card PDFs with isolated visual judgment, auditable artifacts, and one safe task report. Use when Codex is asked to process a PDF directory through this project without persisting or repeating reference-answer content.
+description: Generate blank answer-card PDFs through one whole-paper visual AI result and deterministic rendering.
 ---
 
-# Batch answer-card generation
+# Answer Card Skill v0.4.0
 
-## Product entry
+Use this project only from its own worktree. The whole-paper visual AI is the sole authority for printed structure, scores, percentages, answer blocks, layout, and visual requirements.
 
-Treat `scripts/batch_pipeline.py` as the product interface. For every directory batch, first read [`references/codex-batch-orchestration.md`](references/codex-batch-orchestration.md) and follow its Codex-specific scheduling contract.
+## Hard safety rules
 
-Accept a request such as:
+- Never persist or repeat answers, solutions, reasoning, equation bodies, chemical structures, source-page excerpts, keywords, evidence descriptions, or free notes.
+- Never run PDF text extraction, OCR, regex question detection, outline generation, or skeleton generation.
+- Never reconstruct a prompt visual from a completed answer-key image.
+- A text-only model must stop with `CAPABILITY_UNAVAILABLE` before visual judgment.
 
-```text
-调用 <本地 answer-card-skill 项目目录>，
-处理 <输入目录> 下的答案 PDF，
-输出到 <输出根目录>。
-```
+## Batch workflow
 
-## Safety
+1. Run `prepare INPUT OUTPUT_ROOT`. It fingerprints first-level PDFs and renders every page at 180 DPI. No text, OCR, outline, or number candidates are produced.
+2. Schedule one fresh-context visual worker per whole paper with bounded concurrency. The worker reads `prompts/ai_paper_visual_extract.md`, every ordered page image, and an optional fixed confirmation file. It may write only `allowed_output_path`.
+3. Run `accept-ai-paper`. Invalid JSON, schema failure, missing output, or interruption gets one fresh-context retry.
+4. `needs_human_review` does not count as the whole-paper retry. Give the user the fixed review request, then run `confirm-ai-paper`. A new immutable revision and a new fresh-context whole-paper job are created; scripts never patch confirmed values into a buildable result.
+5. Run serial `build --paper PAPER_ID` as soon as a paper reaches `ai_paper_valid`. Other visual workers may continue within bounded concurrency.
+6. After every paper is `validated` or `failed`, run `report` exactly once.
 
-- Never persist, repeat, summarize, paraphrase, render, or test against reference-answer content.
-- Keep source-page PNG evidence transient and within the assigned job path.
-- Probe every page's text-layer presence with PyMuPDF. Send only text-bearing pages to `pypdf` and only blank pages to the built-in transient RapidOCR fallback. Probe text, OCR text, and rendered OCR images must remain in memory; persist only the validated answer-free outline.
-- Persist only approved structural fields and fixed error codes; never persist page text, equations, answer keys, free-form reasons, or visual descriptions.
-- Require direct visual inspection capability for AI layout judgment. Fail the paper with `CAPABILITY_UNAVAILABLE` if that capability is absent.
-- Never create contact sheets or reconstruct clean prompt visuals from completed answer-key graphics.
+State flow:
 
-## Workflow
+`prepared → awaiting_ai_paper → ai_paper_running → ai_paper_valid → building → validated`
 
-- Preserve a concise problem summary in a major-question heading only when the source prints that summary next to the question number; otherwise render only the question number, score, and percentage. Render the heading as `第 N 题 [原题简述]（X 分，占 Y%）` and never append a full-width or half-width period after the closing parenthesis.
-- Before applying the 30% pagination rules, calculate each block's rendered page cost from its qspec answer height, the configured horizontal-rule width, and any major-question title height at that position. Apply alignment growth to item-level heights and repaginate before recompilation; if page membership changes, discard stale page-indexed top spacers and remeasure the bounded alignment loop. Never allow a post-pagination adjustment to bypass whole-block pagination.
+Human branch:
 
-1. Run `prepare INPUT OUTPUT_ROOT` once. It creates a new immutable run, answer-free outlines, strict `ai_layout_job.attempt-1.json` jobs, and transient source pages. PyMuPDF first probes all pages in one lightweight pass; `pypdf` extracts only text-bearing pages, while blank pages automatically use the in-memory OCR fallback at `220 DPI`. No probe transcript, OCR transcript, or OCR page image is written.
-2. Schedule one fresh-context visual worker per whole paper with bounded concurrency. Each worker may write only the `allowed_output_path` in its job: `ai_layout.attempt-N.json`.
-3. Run `accept-ai-layout` for each completed attempt. Only the main Agent may promote validated output to formal `ai_layout.json`.
-4. As soon as one paper reaches `ai_layout_valid`, run `build --paper PAPER_ID`. Serialize local XeLaTeX builds while other visual workers continue.
-5. Use `fail-paper` for interrupted, unsafe, or incapable workers. Capacity shortage is a queue condition, not a paper failure.
-6. After every paper is `validated` or `failed`, run `report` exactly once. A repeated `report` call returns the existing reports without regenerating them.
-7. If the report requires prompt visuals, deliver the no-image draft. During preparation, run `prepare_clean_image.py` to create only sibling `<original>-clean.png` files; do not modify qspec, TeX, PDF, reports, or formal outputs. This deterministic command only composites transparency onto white and applies one global luminance threshold. Never crop, resize, rotate, inpaint, locally erase, redraw, complete content, or recover a prompt visual from an answer graphic.
-8. After every required clean asset for one paper is approved, create strict `prompt_image_binding.json`, run `bind_prompt_images.py check`, then run `bind` once for the whole paper. Manifest v2 may use `cleaned` or explicitly `approved_original` assets and fixed cancellation/merge/height/placement overrides; never bind a partial approval set or clean an approved-original asset.
-9. For a batch, bind papers individually but regenerate the aggregate task report exactly once after all binding attempts finish.
+`ai_paper_running → needs_human_review → awaiting_human_confirmation → awaiting_ai_paper`
 
-The state flow is `prepared → awaiting_ai_layout → ai_layout_running → ai_layout_valid → building → validated`, with `failed` as the terminal failure state. A first recoverable attempt failure returns to `awaiting_ai_layout` with attempt 2.
-
-## Retry and stopping rules
-
-- Retry invalid JSON, schema failure, tool interruption, or transient evidence-read failure exactly once in a new fresh-context worker.
-- Do not retry structural conflicts, changed source fingerprints, capability preflight failures, or safety refusals.
-- The required per-item `unknown` reinspection occurs inside one worker attempt and does not count as the whole-paper retry.
-- Stop at the no-image initial PDF until every clean asset for that paper is approved.
-- A changed clean or binding-asset hash invalidates approval. Stop and require whole-paper reapproval.
-- Binding may use only the existing answer-free qspec and `visual_requirements.json`; do not reopen the reference answer or rerun AI layout judgment.
-- A failed build or publication must leave the formal PDF unchanged and retain safe diagnostics.
+`failed` is terminal. Slot shortage means queueing, not paper failure. Builds are always serial.
 
 ## Commands
 
 ```powershell
-.\.venv\Scripts\python scripts\batch_pipeline.py prepare INPUT OUTPUT_ROOT [--metadata INPUT\answercard-batch.yaml] [--visual-workers N]
-.\.venv\Scripts\python scripts\batch_pipeline.py status RUN\batch_manifest.json
-.\.venv\Scripts\python scripts\batch_pipeline.py accept-ai-layout RUN\batch_manifest.json PAPER_ID RUN\.work\PAPER_ID\ai_layout.attempt-N.json
-.\.venv\Scripts\python scripts\batch_pipeline.py build RUN\batch_manifest.json [--paper PAPER_ID]
-.\.venv\Scripts\python scripts\batch_pipeline.py fail-paper RUN\batch_manifest.json PAPER_ID --code CODE
-.\.venv\Scripts\python scripts\batch_pipeline.py report RUN\batch_manifest.json
-.\.venv\Scripts\python scripts\prepare_clean_image.py SOURCE_IMAGE [--threshold 195]
-.\.venv\Scripts\python scripts\bind_prompt_images.py check prompt_image_binding.json --qspec QSPEC --visual-requirements VISUAL_REQUIREMENTS
-.\.venv\Scripts\python scripts\bind_prompt_images.py bind prompt_image_binding.json --qspec QSPEC --visual-requirements VISUAL_REQUIREMENTS --build-dir BUILD --formal-pdf FORMAL_PDF --pipeline-report PIPELINE_REPORT
+python scripts/batch_pipeline.py prepare INPUT OUTPUT_ROOT
+python scripts/batch_pipeline.py status RUN\batch_manifest.json
+python scripts/batch_pipeline.py accept-ai-paper RUN\batch_manifest.json PAPER_ID ATTEMPT_JSON
+python scripts/batch_pipeline.py confirm-ai-paper RUN\batch_manifest.json PAPER_ID CONFIRMATION_JSON
+python scripts/batch_pipeline.py build RUN\batch_manifest.json --paper PAPER_ID
+python scripts/batch_pipeline.py fail-paper RUN\batch_manifest.json PAPER_ID --code CODE
+python scripts/batch_pipeline.py report RUN\batch_manifest.json
 ```
 
-Run project tests only through:
+qspec v2 machine keys are internal. Render `display_id`; bind prompt images by machine `item_id`. Do not reject or rewrite duplicate, discontinuous, or parent/descendant display numbers.
 
-```powershell
-.\.venv\Scripts\python scripts\run_tests.py
-```
+For scheduling, retries, recovery, and worker handoff, read [references/codex-batch-orchestration.md](references/codex-batch-orchestration.md). For exact schemas, read [docs/data-contracts.md](docs/data-contracts.md).
+
+Use `python scripts/run_tests.py` for verification. Do not commit, tag, or push the experiment before real-paper acceptance.
