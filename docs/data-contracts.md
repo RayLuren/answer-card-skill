@@ -1,4 +1,4 @@
-# v0.4.0 数据契约
+# v0.5.0 数据契约
 
 ## `ai_paper_job.revision-R.attempt-N.json`
 
@@ -49,7 +49,7 @@ Job 不得包含 outline、skeleton、OCR 文本、页面文字、候选题号�
 
 `unknown` 只能使用 `95mm` 且 fallback 必须为 true。其他题型 fallback 必须为 false。
 
-脚本递归拒绝答案、解答、推理、方程/结构正文、摘录、匹配文字、关键词、原因、证据、描述、notes 和 confidence 字段。印刷占比合计不为 100 只记录，不阻断。derived 值由 AI 提供，脚本不重新分配。
+脚本递归拒绝答案、解答、推理、方程/结构正文、摘录、匹配文字、关键词、原因、证据、描述、notes 和 confidence 字段。印刷占比合计不为 100 只记录，不阻断。完整 `ready` 结果不得混用 `printed` 与 `derived`。derived 值由 AI 提供，脚本用精确分数校验它们是否符合按大题分值计算的最大余数分配；余数相同按题目出现顺序处理。脚本只验证，不改写 AI 提交的占比。
 
 ### `status: needs_human_review`
 

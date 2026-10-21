@@ -3,9 +3,21 @@ name: answer-card-skill
 description: Generate blank answer-card PDFs through one whole-paper visual AI result and deterministic rendering.
 ---
 
-# Answer Card Skill v0.4.0
+# Answer Card Skill v0.5.0
 
-Use this project only from its own worktree. The whole-paper visual AI is the sole authority for printed structure, scores, percentages, answer blocks, layout, and visual requirements.
+Use the complete repository source tree, resolve its root from this skill, and run project commands there. The whole-paper visual AI is the sole authority for printed structure, scores, percentages, answer blocks, layout, and visual requirements.
+
+## First use and capability preflight
+
+Before processing reference-answer PDFs, follow [docs/getting-started.md](docs/getting-started.md) in this order:
+
+1. Verify access to the repository and input files, permission to write the intended output and temporary directories, and command execution. Verify actual direct inspection of full-page images and the ability to give one whole paper to a visual worker in an independent context; a model name alone does not prove either capability. If a required capability is unavailable, stop with `CAPABILITY_UNAVAILABLE` and identify it.
+2. Check Python 3.11+, create or reuse the project's virtual environment, and install the Python dependencies with `python -m pip install -e .`. Keep their declaration in `pyproject.toml`.
+3. Reuse an available XeLaTeX installation. On Windows, use official MiKTeX when TeX is missing; on other systems, choose an appropriate official TeX Live or MiKTeX installation. Use its package manager to prepare `ctex`, `xeCJK`, `fontspec`, and the other template packages before the sample build.
+4. Check the template's font choices in order: Chinese `SimSun` → `Songti SC` → `Source Han Serif SC` → `Noto Serif CJK SC`; Latin `Times New Roman` → `TeX Gyre Termes`. If either list has no available font, report the missing family and point to the official open-font download in the getting-started guide. Do not bundle fonts or copy Windows font files into a public repository.
+5. Build the existing answer-free sample in a new build subdirectory, render every resulting PDF page, and inspect the images. Check Chinese characters, Latin text, bold/italic styles, page numbers, and layout, especially after a font substitution. Passing unit tests alone does not establish TeX or font readiness.
+
+This workflow has no cross-platform automatic installer. Repeat the relevant checks when the runtime, TeX installation, fonts, or host capabilities change.
 
 ## Hard safety rules
 
@@ -49,4 +61,4 @@ qspec v2 machine keys are internal. Render `display_id`; bind prompt images by m
 
 For scheduling, retries, recovery, and worker handoff, read [references/codex-batch-orchestration.md](references/codex-batch-orchestration.md). For exact schemas, read [docs/data-contracts.md](docs/data-contracts.md).
 
-Use `python scripts/run_tests.py` for verification. Do not commit, tag, or push the experiment before real-paper acceptance.
+Use `python scripts/run_tests.py` for code verification; keep first-use sample rendering and visual inspection separate from the unit-test result.

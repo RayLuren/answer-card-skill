@@ -121,6 +121,37 @@ def _write_manifest(tmp_path: Path, items: list[dict[str, object]]) -> Path:
     return path
 
 
+@pytest.mark.parametrize("schema_version", [1, 2])
+def test_required_visual_ids_use_machine_keys_for_both_manifest_versions(
+    tmp_path: Path, schema_version: int,
+) -> None:
+    paths = _write_inputs(tmp_path, required_ids=("1-1",))
+    expected = ["1-1"]
+    if schema_version == 2:
+        qspec = yaml.safe_load(paths["qspec"].read_text(encoding="utf-8"))
+        qspec["schema_version"] = 2
+        question = qspec["questions"][0]
+        question.update(id="q001", display_id="9")
+        visual = json.loads(paths["visual"].read_text(encoding="utf-8"))
+        visual["schema_version"] = 2
+        visual_question = visual["questions"][0]
+        visual_question.pop("id")
+        visual_question.update(question_id="q001", display_id="9")
+        for index, (block, item) in enumerate(
+            zip(question["blocks"], visual_question["items"], strict=True), start=1,
+        ):
+            machine_id = f"q001-i{index:03d}"
+            display_id = f"9-2-{index}"
+            block.update(id=machine_id, display_id=display_id)
+            item.pop("id")
+            item.update(item_id=machine_id, display_id=display_id)
+        paths["qspec"].write_text(yaml.safe_dump(qspec), encoding="utf-8")
+        paths["visual"].write_text(json.dumps(visual), encoding="utf-8")
+        expected = ["q001-i001"]
+
+    assert binding_script._required_visual_ids(paths["qspec"], paths["visual"]) == expected
+
+
 def test_binding_gate_requires_whole_paper_approval(tmp_path: Path) -> None:
     paths = _write_inputs(tmp_path)
     first = _write_asset(tmp_path, "first-clean.png", b"first")

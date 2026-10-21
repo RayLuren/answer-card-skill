@@ -13,8 +13,54 @@
 \usepackage{tabularx}
 \usepackage{xcolor}
 
-\setmainfont{Times New Roman}
-\setCJKmainfont[AutoFakeBold=3]{SimSun}
+% Missing glyphs must fail compilation instead of producing blank squares.
+\tracinglostchars=3
+
+% Resolve installed fonts once so every explicit Latin-font override shares
+% the same fallback. Font files are not bundled with the Skill.
+\newcommand{\AnswerLatinFont}{}
+\IfFontExistsTF{Times New Roman}{%
+  \renewcommand{\AnswerLatinFont}{Times New Roman}%
+}{%
+  \IfFontExistsTF{TeX Gyre Termes}{%
+    \renewcommand{\AnswerLatinFont}{TeX Gyre Termes}%
+  }{%
+    \PackageError{answercard}{No supported Latin font found. Install TeX Gyre Termes}%
+      {Install the open-source TeX Gyre Termes font, then rebuild.}%
+  }%
+}
+\setmainfont{\AnswerLatinFont}
+\typeout{answercard: Latin font = \AnswerLatinFont}
+
+\newcommand{\AnswerCJKFont}{}
+\newcommand{\AnswerUseCJKFont}[1]{%
+  \renewcommand{\AnswerCJKFont}{#1}%
+  \IfFontExistsTF{#1 Bold}{%
+    \setCJKmainfont[BoldFont={#1 Bold}]{#1}%
+  }{%
+    \setCJKmainfont{#1}%
+  }%
+}
+\IfFontExistsTF{SimSun}{%
+  \renewcommand{\AnswerCJKFont}{SimSun}%
+  \setCJKmainfont[AutoFakeBold=3]{SimSun}%
+}{%
+  \IfFontExistsTF{Songti SC}{%
+    \AnswerUseCJKFont{Songti SC}%
+  }{%
+    \IfFontExistsTF{Source Han Serif SC}{%
+      \AnswerUseCJKFont{Source Han Serif SC}%
+    }{%
+      \IfFontExistsTF{Noto Serif CJK SC}{%
+        \AnswerUseCJKFont{Noto Serif CJK SC}%
+      }{%
+        \PackageError{answercard}{No supported Chinese font found. Install Source Han Serif SC or Noto Serif CJK SC}%
+          {Install the open-source Source Han Serif SC or Noto Serif CJK SC font, then rebuild.}%
+      }%
+    }%
+  }%
+}
+\typeout{answercard: CJK font = \AnswerCJKFont}
 
 \setlength{\parindent}{0pt}
 \setlength{\parskip}{0pt}
@@ -56,7 +102,7 @@
 }
 
 \newcommand{\constantitem}[1]{%
-  {\fontspec{Times New Roman}\fontsize{10.5pt}{12.5pt}\selectfont\bfseries #1}%
+  {\fontspec{\AnswerLatinFont}\fontsize{10.5pt}{12.5pt}\selectfont\bfseries #1}%
 }
 \newcommand{\physvar}[1]{{\itshape #1}}
 

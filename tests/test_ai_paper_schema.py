@@ -97,6 +97,27 @@ def test_printed_percent_total_is_audit_only() -> None:
     assert audit["unknown_fallback_item_ids"] == ["q001-i002"]
 
 
+def test_derived_percentages_require_exact_allocation_and_ordered_ties() -> None:
+    data = ready_spec()
+    data["questions"] = [copy.deepcopy(data["questions"][0]) for _ in range(3)]
+    for question, percent in zip(data["questions"], [34, 33, 33]):
+        question.update(score=1, percent=percent, percent_source="derived")
+    validate_ai_paper_spec(data, page_count=2)
+    data["questions"][0]["percent"] = 33
+    with pytest.raises(ValueError, match="largest-remainder"):
+        validate_ai_paper_spec(data, page_count=2)
+    data["questions"][2]["percent"] = 34
+    with pytest.raises(ValueError, match="largest-remainder"):
+        validate_ai_paper_spec(data, page_count=2)
+
+
+def test_ready_rejects_mixed_percentage_sources() -> None:
+    data = ready_spec()
+    data["questions"][0]["percent_source"] = "derived"
+    with pytest.raises(ValueError, match="mix printed and derived"):
+        validate_ai_paper_spec(data, page_count=2)
+
+
 @pytest.mark.parametrize("field", ["answer", "reason", "evidence", "review_notes"])
 def test_forbidden_answer_or_free_evidence_fields_are_rejected(field: str) -> None:
     data = ready_spec()

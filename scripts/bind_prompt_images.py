@@ -32,7 +32,7 @@ from answercard.prompt_image_binding import (  # noqa: E402
 from answercard.pipeline_timing import PipelineTimer  # noqa: E402
 from answercard.schema import load_spec  # noqa: E402
 from answercard.task_report import write_task_report  # noqa: E402
-from answercard.visual_requirements import load_visual_requirements  # noqa: E402
+from answercard.visual_requirements import load_visual_requirements, visual_item_machine_id  # noqa: E402
 from build import BuildError, build_answer_card  # noqa: E402
 from finalize_pipeline import FinalizePipelineError, finalize_pipeline  # noqa: E402
 from render_pages import RenderPagesError, render_pdf_pages  # noqa: E402
@@ -428,7 +428,7 @@ def _required_visual_ids(qspec_path: Path, visual_path: Path) -> list[str]:
     except (OSError, ValueError, json.JSONDecodeError):
         return []
     return [
-        str(item["id"])
+        visual_item_machine_id(item)
         for question in data["questions"]
         for item in question["items"]
         if item["requires_preprinted_visual"] is True

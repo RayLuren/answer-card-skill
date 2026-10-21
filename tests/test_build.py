@@ -44,6 +44,44 @@ def test_build_invokes_xelatex_with_expected_command(tmp_path: Path, monkeypatch
     )
 
 
+def test_successful_build_replaces_the_previous_failed_compile_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+    log_path = build_dir / "build.log"
+    log_path.write_text("previous failed compilation", encoding="utf-8")
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        (build_dir / "answercard.pdf").write_bytes(b"%PDF-1.7\n")
+        return subprocess.CompletedProcess(command, 0, stdout="current successful compilation", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    build_answer_card("spec/qspec.sample.yaml", build_dir=build_dir)
+
+    log = log_path.read_text(encoding="utf-8")
+    assert "current successful compilation" in log
+    assert "previous failed compilation" not in log
+
+
+def test_build_rejects_missing_glyphs_even_when_xelatex_reports_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    build_dir = tmp_path / "build"
+    message = "Missing character: A required character is absent from the selected font."
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        (build_dir / "answercard.pdf").write_bytes(b"%PDF-1.7\n")
+        return subprocess.CompletedProcess(command, 0, stdout=message, stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(BuildError, match="font is missing glyphs"):
+        build_answer_card("spec/qspec.sample.yaml", build_dir=build_dir)
+
+    assert not (build_dir / "answercard.pdf").exists()
+    assert message in (build_dir / "build.log").read_text(encoding="utf-8")
+
+
 def test_build_reports_missing_xelatex_without_traceback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -233,6 +271,61 @@ questions:
     assert tex.count(r"\par\newpage") == 3
 
 
+
+
+def test_alignment_recovers_unexpected_tex_page_growth_without_changing_spec(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec_path = tmp_path / "qspec.yaml"
+    spec_path.write_text("""
+schema_version: 1
+paper:
+  title: Measured page recovery
+  page_size: A4
+  omit_front_page: true
+  total_score: 30
+  margin: {top: 12mm, bottom: 12mm, left: 10mm, right: 10mm}
+style: {label_width: 13mm, border_width: 0.6pt, box_gap: 1.5mm, title_gap: 2mm}
+questions:
+  - id: "1"
+    title: One
+    score: 10
+    percent: 34
+    blocks: [{id: "1-1", kind: calculation, height: 60mm}]
+  - id: "2"
+    title: Two
+    score: 10
+    percent: 33
+    blocks: [{id: "2-1", kind: calculation, height: 60mm, force_page_break_before: true}]
+  - id: "3"
+    title: Three
+    score: 10
+    percent: 33
+    blocks: [{id: "3-1", kind: calculation, height: 60mm, force_page_break_before: true}]
+""", encoding="utf-8")
+    original = spec_path.read_bytes()
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+    batches = [
+        [FrameMeasurement(1,16,16), FrameMeasurement(2,12,20), FrameMeasurement(3,16,50)],
+        [FrameMeasurement(i,12,40+i*10) for i in range(1,5)],
+        [FrameMeasurement(1,16,16), FrameMeasurement(2,16,16), FrameMeasurement(3,16,50)],
+    ]
+    measure = Mock(side_effect=batches)
+    compile_mock = Mock()
+    monkeypatch.setattr(build_script, "measure_pdf_frames", measure)
+    monkeypatch.setattr(build_script, "_compile_tex", compile_mock)
+    build_script._align_compiled_pages(
+        spec_path, build_dir/"answercard.tex", build_dir/"answercard.pdf", build_dir,
+        xelatex="xelatex", max_passes=3, tolerance_mm=1.1,
+    )
+    assert compile_mock.call_count == 2
+    assert measure.call_count == 3
+    assert spec_path.read_bytes() == original
+    import json
+    passes=json.loads((build_dir/"frame_alignment.json").read_text(encoding="utf-8"))["passes"]
+    assert [(p["expected_body_pages"], p["measured_body_pages"]) for p in passes] == [(3,3),(3,4),(3,3)]
+    assert (build_dir/"answercard.tex").read_text(encoding="utf-8").count(r"\par\newpage") == 2
 
 
 def test_build_cli_forwards_an_isolated_build_directory(

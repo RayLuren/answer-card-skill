@@ -84,18 +84,13 @@ def _align_compiled_pages(
     report: list[dict[str, object]] = []
     alignment_target_mm: float | None = None
     frozen_plan = False
+    recovery_plan: list[PlannedPage] | None = None
+    recovery_target_mm: float | None = None
     _write_alignment_report(build_dir, report)
 
     for pass_number in range(max_passes + 1):
         measurements = measure_pdf_frames(pdf_path, skip_pages=front_page_count)
         expected_total_page_count = expected_body_page_count + front_page_count
-        if len(measurements) != expected_body_page_count:
-            raise BuildError(
-                f"page alignment expected {expected_body_page_count} body pages and "
-                f"{expected_total_page_count} total pages but measured "
-                f"{len(measurements)} body pages"
-            )
-
         top_spread, bottom_spread = alignment_spreads(
             measurements,
             include_last_bottom=False,
@@ -108,6 +103,8 @@ def _align_compiled_pages(
         report.append(
             {
                 "pass": pass_number,
+                "expected_body_pages": expected_body_page_count,
+                "measured_body_pages": len(measurements),
                 "top_spread_mm": round(top_spread, 3),
                 "bottom_spread_mm": round(bottom_spread, 3),
                 "bottom_spread_all_pages_mm": round(all_bottom_spread, 3),
@@ -122,6 +119,28 @@ def _align_compiled_pages(
             }
         )
         _write_alignment_report(build_dir, report)
+        if len(measurements) != expected_body_page_count:
+            if recovery_plan is None or pass_number == max_passes:
+                raise BuildError(
+                    f"page alignment expected {expected_body_page_count} body pages and "
+                    f"{expected_total_page_count} total pages but measured "
+                    f"{len(measurements)} body pages"
+                )
+            # TeX rejected the repaginated cost estimate.  Return to the last
+            # measured page membership and apply only its measured corrections.
+            # This consumes a correction pass and never changes the source spec.
+            current_plan = recovery_plan
+            recovery_plan = None
+            expected_body_page_count = len(current_plan)
+            page_top_spacers = [page.top_spacer_mm for page in current_plan]
+            alignment_target_mm = recovery_target_mm
+            frozen_plan = True
+            render_tex(
+                spec_path, tex_path, planned_pages=current_plan,
+                image_bindings=image_bindings,
+            )
+            _compile_tex(tex_path, pdf_path, build_dir, xelatex=xelatex)
+            continue
         if top_spread <= tolerance_mm and bottom_spread <= tolerance_mm:
             return
         if pass_number == max_passes:
@@ -146,6 +165,11 @@ def _align_compiled_pages(
                 page_top_spacers_mm=page_top_spacers,
             )
         else:
+            recovery_plan = adjust_planned_pages(
+                current_plan, height_delta,
+                page_top_spacers_mm=page_top_spacers,
+            )
+            recovery_target_mm = alignment_target_mm
             for planned_page, delta in zip(current_plan, height_delta, strict=True):
                 page_blocks = [
                     planned_block
@@ -238,15 +262,21 @@ def _compile_tex(tex_path: Path, pdf_path: Path, build_dir: Path, *, xelatex: st
             "or add xelatex to PATH."
         ) from exc
 
+    _write_build_log(build_dir, command, result.stdout, result.stderr)
+    if "Missing character:" in result.stdout or "Missing character:" in result.stderr:
+        pdf_path.unlink(missing_ok=True)
+        raise BuildError(
+            "A selected font is missing glyphs. Install a complete supported font "
+            "and rebuild; do not use a subset font missing required characters. "
+            f"See {build_dir / DEFAULT_LOG_NAME} for details."
+        )
     if result.returncode != 0:
-        _write_build_log(build_dir, command, result.stdout, result.stderr)
         raise BuildError(
             f"xelatex failed with exit code {result.returncode}. "
             f"See {build_dir / DEFAULT_LOG_NAME} for details."
         )
 
     if not pdf_path.exists() or pdf_path.stat().st_size <= 0:
-        _write_build_log(build_dir, command, result.stdout, result.stderr)
         raise BuildError(
             f"xelatex finished without a usable new PDF at {pdf_path}. "
             f"See {build_dir / DEFAULT_LOG_NAME} for details."

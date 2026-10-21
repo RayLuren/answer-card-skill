@@ -31,7 +31,7 @@ def test_production_entry_docs_do_not_reference_retired_markdown_brief() -> None
     entries = [
         PROJECT_ROOT / "SKILL.md",
         PROJECT_ROOT / "README.md",
-        PROJECT_ROOT.parent / "AGENTS.md",
+        PROJECT_ROOT / "README.en.md",
     ]
     combined = "\n".join(path.read_text(encoding="utf-8") for path in entries)
     assert "prepare_ai_layout_task.py" not in combined

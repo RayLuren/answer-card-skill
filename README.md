@@ -1,8 +1,10 @@
-# Answer Card Skill v0.4.0
+# Answer Card Skill v0.5.0
 
 [English](README.en.md)
 
 本项目用 Python、Jinja2 和 XeLaTeX 生成不含答案内容的空白答题卡。v0.4.0 取消 PDF 文本层、OCR 和正则题号抽取：每份试卷由一个 fresh-context 视觉 AI 按页检查整卷，并一次给出结构、分值占比、答题空间和配图需求。
+
+v0.5.0 补充首次环境检查和系统字体回退。使用完整仓库源码、Python 3.11+ 和虚拟环境，以 `python -m pip install -e .` 安装 `pyproject.toml` 中的依赖。首次使用由 Agent 依次检查能力、Python、XeLaTeX/中文 TeX 包和字体，再生成样例 PDF 并渲染看图；详见[开始使用](docs/getting-started.md)。已有环境直接复用，不提供跨平台自动安装器，不随仓库分发字体。
 
 > v0.4.0 已完成冲突卷整卷视觉验收、A4 成品检查和自动化回归；视觉 AI 仍须具备直接检查全部页面的能力。
 
@@ -32,6 +34,8 @@ flowchart TD
 
 脚本不会检查 AI 显示题号是否重复、连续、符合数字顺序或层级，也不会用另一份 outline、OCR 或正则结果否决 AI。qspec v2 生成唯一机器键 `q001`、`q001-i001`，页面只打印 AI 的 `display_id`。
 
+占比校验保留原卷印刷值；派生值必须符合按分值计算的精确最大余数分配，余数相同时按题目出现顺序分配。完整结果不得混用印刷与派生占比。
+
 ## 批处理命令
 
 ```powershell
@@ -44,6 +48,8 @@ python scripts/batch_pipeline.py report RUN\batch_manifest.json
 ```
 
 默认最多进行 3 次页框校正。已由无答案测量历史确认属于慢收敛的单卷，可显式使用 `build ... --max-alignment-passes 4`；非默认上限会写入任务报告，`1.1mm` 验收标准保持不变。
+
+若校正后的 TeX 页数与分页计划不符，构建会在同一修正上限内退回上一次实际测量的页面题块分布，再应用该次测量修正。原始 qspec 不变；每次测量保留预计与实际正文页数。
 
 `prepare` 只扫描输入目录第一层 PDF，冻结 SHA-256，并以 180 DPI 输出稳定命名的 `page-001.png` 等临时视觉证据。它不读取 PDF 文本层，不运行 OCR，不生成 outline、skeleton、页面文字或题号候选。
 
@@ -65,7 +71,7 @@ python scripts/batch_pipeline.py report RUN\batch_manifest.json
 
 ## 模型能力
 
-结构判断需要能直接查看全部页面图像的视觉模型或可信视觉工具。纯文本模型可以运行确定性阶段，但不得声称整卷视觉结构判断完成。GPT-5.5 和 GPT-5.6 是开发来源记录，不构成厂商锁定或其他模型兼容保证。
+宿主需要文件读写、命令执行、直接查看完整页面图像，以及在独立上下文中调度整卷视觉 worker 的能力；以实际可用工具为准。纯文本模型可以运行确定性阶段，但不得声称整卷视觉结构判断完成。完整能力检查见 [SKILL.md](SKILL.md)，环境准备见[开始使用](docs/getting-started.md)。GPT-5.5 和 GPT-5.6 是开发来源记录，不构成厂商锁定或其他模型兼容保证。
 
 ## 构建与验证
 

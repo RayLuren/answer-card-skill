@@ -1,8 +1,10 @@
-# Answer Card Skill v0.4.0
+# Answer Card Skill v0.5.0
 
 [简体中文](README.md)
 
 This project generates blank, answer-free answer-card PDFs with Python, Jinja2, and XeLaTeX. v0.4.0 removes PDF text extraction, OCR, and regex-based number detection. One fresh-context visual AI worker inspects every page of one whole paper and returns structure, scores and percentages, answer-space layout, and prompt-visual requirements together.
+
+v0.5.0 adds first-use environment checks and system-font fallbacks. Use the complete source repository, Python 3.11+, and a virtual environment; install the dependencies declared in `pyproject.toml` with `python -m pip install -e .`. Before first use, the Agent checks host capabilities, Python, XeLaTeX/Chinese TeX packages, and fonts, then compiles and visually inspects the sample PDF. See [getting started](docs/getting-started.md). Reuse existing environments; the project has no cross-platform automatic installer and does not bundle fonts.
 
 > v0.4.0 has completed conflict-paper whole-document visual acceptance, A4 artifact checks, and automated regression testing. The visual AI must still be capable of inspecting every supplied page directly.
 
@@ -30,6 +32,8 @@ flowchart TD
 
 Scripts do not judge whether AI display numbers are duplicate, continuous, numerically sorted, or hierarchically plausible. qspec v2 creates unique machine keys such as `q001` and `q001-i001`; rendered cards print only the AI-authored `display_id`.
 
+Percentage validation preserves printed values. Derived values must match the exact largest-remainder allocation from scores, with ties resolved by visible question order. A complete result cannot mix printed and derived percentages.
+
 ## Batch commands
 
 ```powershell
@@ -43,6 +47,8 @@ python scripts/batch_pipeline.py report RUN\batch_manifest.json
 
 The default remains three frame-alignment correction passes. A paper confirmed by answer-free measurements to be slowly convergent may use `build ... --max-alignment-passes 4`; the non-default limit is recorded in the task report and the `1.1mm` tolerance remains unchanged.
 
+If corrected TeX produces a different page count from the plan, the build returns to the last measured page membership and applies its measured corrections within the same correction limit. The original qspec is unchanged; each measurement retains expected and actual body-page counts.
+
 `prepare` discovers only first-level PDFs, freezes SHA-256 fingerprints, and renders stable `page-001.png` evidence at 180 DPI. It does not read PDF text, invoke OCR, or create outlines, skeletons, page transcripts, or number candidates.
 
 Each visual worker may write only its job's `allowed_output_path`. Human review does not consume the single automatic invalid-output retry. A confirmation creates an immutable revision, and a new context must regenerate the complete paper result from all page images. The formal task report is written exactly once after every paper is `validated` or `failed`.
@@ -55,7 +61,7 @@ See [data contracts](docs/data-contracts.md) and [Codex batch orchestration](ref
 
 ## Model and validation requirements
 
-A model or trusted tool with direct page-image understanding is required for visual extraction. A text-only model may run deterministic stages but must not claim visual completion. GPT-5.5 and GPT-5.6 are development provenance, not vendor lock-in or compatibility guarantees.
+The host needs file access, command execution, direct full-page image inspection, and the ability to schedule a whole-paper visual worker in an independent context. Verify the actual tools available. A text-only model may run deterministic stages but must not claim visual completion. See [SKILL.md](SKILL.md) for capability checks and [getting started](docs/getting-started.md) for environment preparation. GPT-5.5 and GPT-5.6 are development provenance, not vendor lock-in or compatibility guarantees.
 
 The PDF path retains A4 output, whole-block pagination, centered bottom page numbers, preview rendering, and frame alignment. Alignment is measured at 200 DPI with a default tolerance of 1.1 mm.
 

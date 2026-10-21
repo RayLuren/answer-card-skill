@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from fractions import Fraction
 from pathlib import Path
 import re
 from typing import Any
@@ -106,6 +107,19 @@ def validate_ai_paper_spec(data: Any, *, page_count: int) -> dict[str, Any]:
             raise ValueError("ready ai_paper_spec.review_items must be empty")
         for index, question in enumerate(questions):
             _validate_question(question, index=index, page_count=page_count)
+        sources = {question["percent_source"] for question in questions}
+        if len(sources) != 1:
+            raise ValueError("ready percentages must not mix printed and derived values")
+        if sources == {"derived"}:
+            scores = [Fraction(str(question["score"])) for question in questions]
+            total_score = sum(scores)
+            exact = [100 * score / total_score for score in scores]
+            expected = [int(value) for value in exact]
+            order = sorted(range(len(questions)), key=lambda index: (-(exact[index] - expected[index]), index))
+            for index in order[:100 - sum(expected)]:
+                expected[index] += 1
+            if [question["percent"] for question in questions] != expected:
+                raise ValueError("derived percentages must match exact largest-remainder allocation")
     else:
         if questions:
             raise ValueError("needs_human_review must not contain a buildable partial result")

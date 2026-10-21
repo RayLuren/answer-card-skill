@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 import pytest
 
@@ -21,7 +22,7 @@ def test_render_tex_contains_questions_and_blocks_without_answers(tmp_path: Path
     render_tex("spec/qspec.sample.yaml", output_path)
 
     tex = output_path.read_text(encoding="utf-8")
-    assert r"\setmainfont{Times New Roman}" in tex
+    assert r"\setmainfont{\AnswerLatinFont}" in tex
     assert r"\setCJKmainfont[AutoFakeBold=3]{SimSun}" in tex
     assert r"\newcommand{\BodyFont}{\fontsize{10.5pt}{12.5pt}\selectfont\bfseries}" in tex
     assert r"\newcommand{\QuestionTitleFont}{\fontsize{10.5pt}{12.5pt}\selectfont\bfseries}" in tex
@@ -77,6 +78,20 @@ def test_render_tex_contains_questions_and_blocks_without_answers(tmp_path: Path
     assert r"\setlength{\arrayrulewidth}{ 0.6pt }" in tex
     assert "答案" not in tex
     assert "参考答案" not in tex
+
+
+def test_render_spec_uses_selected_latin_font_for_all_font_overrides() -> None:
+    tex = render_spec(load_spec("spec/qspec.sample.yaml"))
+
+    # A hard-coded override would make a successful main-font fallback fail
+    # later when, for example, the first-page constants are typeset.
+    explicit_font_overrides = re.findall(r"\\fontspec(?:\[[^\]]*\])?\{([^{}]*)\}", tex)
+    assert explicit_font_overrides
+    assert set(explicit_font_overrides) == {r"\AnswerLatinFont"}
+    assert r"\typeout{answercard: Latin font = \AnswerLatinFont}" in tex
+    assert r"\typeout{answercard: CJK font = \AnswerCJKFont}" in tex
+    assert r"\tracinglostchars=3" in tex
+    assert tex.index(r"\tracinglostchars=3") < tex.index(r"\begin{document}")
 
 
 def test_render_tex_uses_absolute_asset_path_when_relative_path_is_impossible(

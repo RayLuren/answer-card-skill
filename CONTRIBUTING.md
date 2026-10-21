@@ -14,7 +14,6 @@
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python -m pip install -e .
-.\.venv\Scripts\python -m pip install pymupdf
 .\.venv\Scripts\python scripts\run_tests.py
 ```
 
